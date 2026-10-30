@@ -146,7 +146,7 @@ export async function recordReceipt(invoiceId: string, amount: number, date: str
   const t = invoiceTotals(inv, db); if (amount <= 0) err('Amount must be positive'); if (amount > t.balance + 0.001) err(`Amount exceeds balance due (${t.balance})`);
   await api.tx(d => {
     d.receipts.unshift({ id: uid('rcp'), number: seqNo('ORC', d.receipts), invoiceId, amount, date, method });
-    const paid = sum(d.receipts.filter(r => r.invoiceId === invoiceId).map(r => r.amount));
+    const paid = sum(d.receipts.filter(r => r.invoiceId === invoiceId && !r.disabled).map(r => r.amount));
     d.invoices = d.invoices.map(i => i.id === invoiceId ? { ...i, status: paid + 0.001 >= t.total ? 'Paid' : 'Partially Paid' } : i);
     d.notifications.unshift({ id: uid('ntf'), audience: 'internal', title: 'Payment recorded', body: `₹${amount} against ${inv.number}`, link: '/admin/receipts', read: false, at: new Date().toISOString() });
     d.audit.unshift({ id: uid('aud'), at: new Date().toISOString(), user: getSession()?.name || '-', action: 'Payment recorded', entity: 'invoices', entityId: invoiceId, summary: `₹${amount} via ${method} (simulated)` });

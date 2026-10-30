@@ -1,13 +1,14 @@
 import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Upload, Download, History, Trash2, CheckCheck, CheckCircle2, Circle } from 'lucide-react';
+import { Upload, Download, History, CheckCheck, CheckCircle2, Circle } from 'lucide-react';
 import type { Artwork, Proof, Notification } from '../../types';
 import { api, getDB, getFile, saveFile, fileToThumb, useDB, useSession, notify } from '../../services/storage.service';
 import { campaignCompletion } from '../../services/workflows';
-import { Button, Badge, Modal, toast, promptDialog, Card, Empty, PageHeader, Notice, cn, confirmDialog, Stat, Field, Input } from '../../components/ui';
+import { Button, Badge, Modal, toast, promptDialog, Card, Empty, PageHeader, Notice, cn, Stat, Field, Input } from '../../components/ui';
 import { fmtDate, inr, today, sum, invoiceTotals, exportCSV } from '../../utils';
 import { assetName, campName, PrintBtn } from '../../components/shared';
 import { myNotifications } from '../../components/layout';
+import { DisableBtn, DisabledTag, toggleDisabled } from '../../components/disable';
 import { MapPin, Camera, Wallet, CalendarDays } from 'lucide-react';
 
 const MAX = 15 * 1024 * 1024;
@@ -77,9 +78,9 @@ export function NotificationsPage() {
   return <div><PageHeader title="Notifications" subtitle={`${list.filter(n => !n.read).length} unread`} actions={<Button variant="outline" onClick={async () => { await api.tx(d => { d.notifications = d.notifications.map(n => list.some(l => l.id === n.id) ? { ...n, read: true } : n); }); toast('All marked read'); }}><CheckCheck size={16} />Mark all read</Button>} />
     <Card className="divide-y">{list.map((n: Notification) => <div key={n.id} className={cn('flex gap-3 p-4 items-start', !n.read && 'bg-orange-50/40')}>
       <span className={cn('mt-1.5 w-2 h-2 rounded-full', n.read ? 'bg-slate-200' : 'bg-orange-500')} />
-      <button className="flex-1 text-left" onClick={() => { api.update('notifications', n.id, { read: true }, '', true); nav(n.link); }}><div className="font-medium text-sm">{n.title}</div><div className="text-sm text-slate-500">{n.body}</div><div className="text-[11px] text-slate-400 mt-1">{new Date(n.at).toLocaleString('en-IN')}</div></button>
+      <button className="flex-1 text-left" onClick={() => { api.update('notifications', n.id, { read: true }, '', true); nav(n.link); }}><div className={cn('font-medium text-sm', n.disabled && 'opacity-60')}>{n.title} {n.disabled && <DisabledTag />}</div><div className="text-sm text-slate-500">{n.body}</div><div className="text-[11px] text-slate-400 mt-1">{new Date(n.at).toLocaleString('en-IN')}</div></button>
       {!n.read && <Button size="sm" variant="ghost" onClick={() => api.update('notifications', n.id, { read: true }, '', true)}>Mark read</Button>}
-      <Button size="sm" variant="ghost" onClick={async () => { if (await confirmDialog('Delete notification?')) { await api.remove('notifications', n.id, 'Notification deleted'); toast('Deleted'); } }}><Trash2 size={14} className="text-rose-500" /></Button></div>)}
+      <DisableBtn disabled={n.disabled} onClick={() => toggleDisabled('notifications', n, 'Notification')} /></div>)}
       {!list.length && <Empty title="You're all caught up" />}</Card></div>;
 }
 

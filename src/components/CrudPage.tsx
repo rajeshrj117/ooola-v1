@@ -1,11 +1,13 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Plus, Pencil, Trash2, Search } from 'lucide-react';
+import { Plus, Pencil, Search } from 'lucide-react';
+import { DisableBtn, DisabledTag, toggleDisabled } from './disable';
 import { api } from '../services/storage.service';
 import type { CollectionKey } from '../types';
-import { Button, Card, Modal, Field, inputCls, Table, type Col, PageHeader, ExportBtn, toast, confirmDialog, Empty, useFakeLoad, Select } from './ui';
+import { Button, Card, Modal, Field, inputCls, Table, type Col, PageHeader, ExportBtn, toast, Empty, useFakeLoad, Select } from './ui';
 import { exportCSV } from '../utils';
 
-export interface FieldDef { name: string; label: string; type?: 'text' | 'number' | 'select' | 'date' | 'textarea' | 'email' | 'checkbox'; options?: (string | { value: string; label: string })[]; required?: boolean; min?: number; full?: boolean; help?: string; }
+export interface FieldDef { name: string; label: string; type?: 'text' | 'number' | 'select' | 'date' | 'textarea' | 'email' | 'checkbox' | 'phone'; options?: (string | { value: string; label: string })[]; required?: boolean; min?: number; full?: boolean; help?: string; pattern?: RegExp; patternMsg?: string; upper?: boolean; placeholder?: string; }
+export const COUNTRY_CODES: [string, string][] = [['+91', 'IN'], ['+971', 'AE'], ['+65', 'SG'], ['+60', 'MY'], ['+94', 'LK'], ['+977', 'NP'], ['+880', 'BD'], ['+44', 'UK'], ['+1', 'US'], ['+61', 'AU'], ['+966', 'SA'], ['+974', 'QA']];
 export function validate(fields: FieldDef[], v: any) {
   const e: Record<string, string> = {};
   for (const f of fields) {
@@ -13,15 +15,18 @@ export function validate(fields: FieldDef[], v: any) {
     if (f.required && (x === undefined || x === null || String(x).trim() === '')) e[f.name] = `${f.label} is required`;
     else if (f.type === 'number' && x !== '' && x !== undefined && (isNaN(Number(x)) || (f.min !== undefined && Number(x) < f.min))) e[f.name] = `${f.label} must be ≥ ${f.min ?? 0}`;
     else if (f.type === 'email' && x && !/^\S+@\S+\.\S+$/.test(x)) e[f.name] = 'Invalid email';
+    else if (f.type === 'phone' && x && !/^\d{6,14}$/.test(String(x))) e[f.name] = 'Enter 6–14 digits (without country code)';
+    else if (f.pattern && x && !f.pattern.test(String(x).trim())) e[f.name] = f.patternMsg || `Invalid ${f.label}`;
   }
   return e;
 }
 export function FormFields({ fields, value, set, errors }: { fields: FieldDef[]; value: any; set: (k: string, v: any) => void; errors: Record<string, string> }) {
   return <div className="grid sm:grid-cols-2 gap-3">{fields.map(f => <Field key={f.name} label={f.label + (f.required ? ' *' : '')} error={errors[f.name]} className={f.full || f.type === 'textarea' ? 'sm:col-span-2' : ''}>
     {f.type === 'select' ? <Select options={f.options || []} placeholder="Select…" value={value[f.name] ?? ''} onChange={(e: any) => set(f.name, e.target.value)} />
+      : f.type === 'phone' ? <div className="flex gap-2 w-full"><select style={{ width: 96, flex: '0 0 96px', paddingLeft: 8, paddingRight: 4 }} className={inputCls} value={value[f.name + 'Code'] ?? '+91'} onChange={e => set(f.name + 'Code', e.target.value)}>{COUNTRY_CODES.map(([c, n]) => <option key={c + n} value={c}>{c} ({n})</option>)}</select><input type="tel" inputMode="numeric" placeholder={f.placeholder || '9876543210'} style={{ flex: '1 1 0%', minWidth: 0, width: '100%' }} className={inputCls} value={value[f.name] ?? ''} onChange={e => set(f.name, e.target.value.replace(/\D/g, ''))} /></div>
       : f.type === 'textarea' ? <textarea rows={3} className={inputCls} value={value[f.name] ?? ''} onChange={e => set(f.name, e.target.value)} />
         : f.type === 'checkbox' ? <input type="checkbox" className="h-5 w-5 accent-orange-500" checked={!!value[f.name]} onChange={e => set(f.name, e.target.checked)} />
-          : <input type={f.type || 'text'} className={inputCls} value={value[f.name] ?? ''} onChange={e => set(f.name, f.type === 'number' ? e.target.value : e.target.value)} />}
+          : <input type={f.type || 'text'} placeholder={f.placeholder} className={inputCls} value={value[f.name] ?? ''} onChange={e => set(f.name, f.upper ? e.target.value.toUpperCase() : e.target.value)} />}
     {f.help && <span className="text-[11px] text-slate-400">{f.help}</span>}</Field>)}</div>;
 }
 
@@ -47,13 +52,9 @@ export function CrudPage<R extends { id: string }>(p: CrudProps<R>) {
     else { const pr = api.update(p.collection, (editing as R).id, rec, `${label} updated`); setEditing(null); await pr; toast(`${label} updated`); }
     setSaving(false);
   };
-  const del = async (r: R) => {
-    const block = p.deleteCheck?.(r); if (block) return toast(block, 'error');
-    if (!(await confirmDialog(`Delete ${label}?`, 'This action cannot be undone and will be recorded in the audit log.'))) return;
-    await api.remove(p.collection, r.id, `${label} deleted`); toast(`${label} deleted`);
-  };
+  const toggle = (r: R) => toggleDisabled(p.collection, r as any, label);
   const editable = (r: R) => typeof p.canEdit === 'function' ? p.canEdit(r) : p.canEdit !== false;
-  const cols: Col<R>[] = [...p.cols, ...((p.canEdit !== false || p.canDelete !== false || p.extra) ? [{ key: '_a', label: '', className: 'text-right whitespace-nowrap', render: (r: R) => <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>{p.extra?.(r)}{editable(r) && <Button size="sm" variant="ghost" onClick={() => open(r)} title="Edit"><Pencil size={14} /></Button>}{p.canDelete !== false && <Button size="sm" variant="ghost" onClick={() => del(r)} title="Delete"><Trash2 size={14} className="text-rose-500" /></Button>}</div> }] : [])];
+  const cols: Col<R>[] = [...p.cols, ...((p.canEdit !== false || p.canDelete !== false || p.extra) ? [{ key: '_a', label: '', className: 'text-right whitespace-nowrap', render: (r: R) => <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>{p.extra?.(r)}{editable(r) && <Button size="sm" variant="ghost" onClick={() => open(r)} title="Edit"><Pencil size={14} /></Button>}{p.canDelete !== false && <>{(r as any).disabled && <DisabledTag />}<DisableBtn disabled={(r as any).disabled} onClick={() => toggle(r)} /></>}</div> }] : [])];
   return <div>
     <PageHeader title={p.title} subtitle={p.subtitle} actions={<>{p.headerExtra}<ExportBtn onClick={() => exportCSV(p.csvName || p.collection, rows.map(r => Object.fromEntries(p.cols.map(c => [c.label, c.csv ? c.csv(r) : (r as any)[c.key]]))))} />{p.canCreate !== false && <Button onClick={() => open('new')}><Plus size={16} />New {label}</Button>}</>} />
     <Card>

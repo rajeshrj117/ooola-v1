@@ -5,19 +5,20 @@ export type VerificationStatus = 'Draft' | 'Submitted' | 'Under Review' | 'Appro
 export interface Category { id: string; name: string; description: string; enabled: boolean; formats: string[]; bookingModel: BookingModel; requiredFields: string[]; }
 export interface DateBlock { id: string; from: string; to: string; status: 'Held' | 'Blocked'; reason: string; }
 export interface Asset {
-  id: string; code: string; name: string; ownerId: string; categoryId: string; city: string; location: string; address: string;
+  disabled?: boolean; id: string; code: string; name: string; ownerId: string; categoryId: string; city: string; location: string; address: string;
   lat: number; lng: number; width: number; height: number; format: string; lighting: 'Front-lit' | 'Back-lit' | 'Non-lit' | 'Digital LED';
-  rate: number; supplierRate: number; minDays: number; capacity: number; images: string[]; verification: VerificationStatus;
+  rate: number; supplierRate: number; refNo?: string; mrp?: number; agencyRate?: number; minDays: number; capacity: number; images: string[]; verification: VerificationStatus;
   availability: 'Available' | 'Held' | 'Booked' | 'Blocked'; traffic: string; panels: number; blocks: DateBlock[]; verificationNote?: string;
 }
-export interface MediaOwner { id: string; name: string; company: string; email: string; phone: string; address: string; city: string; businessType: string; verification: 'Pending' | 'Verified (simulated)' | 'Rejected'; agreement: 'Not Sent' | 'Sent' | 'Signed (simulated)'; }
-export interface Contact { name: string; email: string; role: string; }
+export interface MediaOwner { id: string; name: string; company: string; email: string; phone: string; address: string; city: string; businessType: string; verification: 'Pending' | 'Verified (simulated)' | 'Rejected'; agreement: 'Not Sent' | 'Sent' | 'Signed (simulated)'; phoneCode?: string; altPhone?: string; website?: string; yearEstablished?: string; state?: string; pincode?: string; landmark?: string; pan?: string; gst?: string; licenceNo?: string; idType?: string; idUploaded?: boolean; onboardingComplete?: boolean; onboardedAt?: string; }
+export interface Contact { disabled?: boolean; name: string; email: string; role: string; }
 export interface Customer { id: string; company: string; contact: string; email: string; phone: string; city: string; industry: string; gstin: string; contacts: Contact[]; }
-export interface Brand { id: string; customerId: string; name: string; category: string; }
+export interface Brand { disabled?: boolean; id: string; customerId: string; name: string; category: string; }
 export interface Campaign { id: string; customerId: string; brandId: string; name: string; start: string; end: string; budget: number; status: 'Planning' | 'Quotation' | 'Booked' | 'Live' | 'Completed' | 'Cancelled'; assetIds: string[]; notes: string; }
 export interface QuoteItem { assetId: string; start: string; end: string; rate: number; supplierCost: number; }
 export type QuoteStatus = 'Requested' | 'Draft' | 'Sent' | 'Revision Requested' | 'Approved' | 'Rejected' | 'Expired';
 export interface Quotation {
+  disabled?: boolean;
   id: string; number: string; campaignId: string; customerId: string; status: QuoteStatus; items: QuoteItem[];
   production: number; installation: number; service: number; productionCost: number; installationCost: number; otherCost: number;
   discount: number; taxRate: number; expiry: string; createdAt: string; notes: string; internalApproved?: boolean;
@@ -35,8 +36,8 @@ export type POStatus = 'Draft' | 'Sent' | 'Confirmed' | 'Rejected' | 'In Executi
 export interface LineItem { desc: string; amount: number; }
 export interface PurchaseOrder { id: string; number: string; ownerId: string; bookingId: string; campaignId: string; items: LineItem[]; status: POStatus; reason: string; createdAt: string; }
 export type InvoiceStatus = 'Draft' | 'Issued' | 'Partially Paid' | 'Paid' | 'Cancelled';
-export interface Invoice { id: string; number: string; customerId: string; campaignId: string; issue: string; due: string; items: LineItem[]; taxRate: number; discount: number; status: InvoiceStatus; }
-export interface Receipt { id: string; number: string; invoiceId: string; amount: number; date: string; method: string; }
+export interface Invoice { disabled?: boolean; id: string; number: string; customerId: string; campaignId: string; issue: string; due: string; items: LineItem[]; taxRate: number; discount: number; status: InvoiceStatus; }
+export interface Receipt { disabled?: boolean; id: string; number: string; invoiceId: string; amount: number; date: string; method: string; }
 export interface SupplierPayment { id: string; poId: string; amount: number; date: string; method: string; reference: string; }
 export interface Expense { id: string; campaignId: string; type: 'Production' | 'Installation' | 'Other'; description: string; amount: number; date: string; }
 export interface Refund { id: string; invoiceId: string; amount: number; reason: string; status: 'Requested' | 'Approved' | 'Rejected'; history: HistoryEntry[]; }
@@ -51,7 +52,7 @@ export interface Dispute {
 }
 export const MAX_PHOTOS = 5;
 export interface User { id: string; name: string; email: string; role: Role; ownerId?: string; customerId?: string; active: boolean; }
-export interface Notification { id: string; audience: 'internal' | 'customer' | 'owner'; targetId?: string; title: string; body: string; link: string; read: boolean; at: string; }
+export interface Notification { disabled?: boolean; id: string; audience: 'internal' | 'customer' | 'owner'; targetId?: string; title: string; body: string; link: string; read: boolean; at: string; }
 export interface AuditEvent { id: string; at: string; user: string; action: string; entity: string; entityId: string; summary: string; }
 export interface Settings { companyName: string; taxRate: number; quoteValidityDays: number; currency: 'INR'; invoiceDueDays: number; gstNote: string; workflows: { requireInternalQuoteApproval: boolean; requireProofApproval: boolean; requireArtworkApproval: boolean }; }
 

@@ -37,7 +37,7 @@ export function invoiceTotals(inv: Invoice, db: DB) {
   const net = r2(subtotal - (inv.discount || 0));
   const tax = r2(net * (inv.taxRate || 0) / 100);
   const total = r2(net + tax);
-  const paid = sum(db.receipts.filter(r => r.invoiceId === inv.id).map(r => r.amount));
+  const paid = sum(db.receipts.filter(r => r.invoiceId === inv.id && !r.disabled).map(r => r.amount));
   const refunded = sum(db.refunds.filter(r => r.invoiceId === inv.id && r.status === 'Approved').map(r => r.amount));
   const balance = inv.status === 'Cancelled' || inv.status === 'Draft' ? 0 : r2(total - paid + refunded);
   const overdue = balance > 0 && inv.due < today() && inv.status !== 'Draft';

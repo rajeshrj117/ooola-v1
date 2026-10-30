@@ -6,6 +6,7 @@ import { useDB, useSession, setSession, api } from '../services/storage.service'
 import { can, type Perm, homeFor } from '../services/workflows';
 import { cn, Button } from './ui';
 import type { User, Notification } from '../types';
+import { OwnerOnboarding } from '../modules/media-owner-portal/Onboarding';
 
 // ---------- shortlist (public + customer)
 const SK = 'oolaa_shortlist'; let sl: string[] = (() => { try { return JSON.parse(localStorage.getItem(SK) || '[]'); } catch { return []; } })(); const sll = new Set<() => void>();
@@ -61,13 +62,13 @@ export function RequireRole({ area }: { area: 'admin' | 'customer' | 'owner' }) 
   const ok = area === 'admin' ? can(u, 'internal') : area === 'customer' ? u.role === 'Customer' : u.role === 'Media Owner';
   if (!ok) return <Navigate to={homeFor(u)} replace />;
   const nav = area === 'admin' ? ADMIN_NAV : area === 'customer' ? CUSTOMER_NAV : OWNER_NAV;
-  return <DashLayout nav={nav} area={area} user={u} />;
+  return <>{area === 'owner' && <OwnerOnboarding />}<DashLayout nav={nav} area={area} user={u} /></>;
 }
 
 function DashLayout({ nav, area, user }: { nav: { group: string; items: NavItem[] }[]; area: string; user: User }) {
   const [collapsed, setCollapsed] = useState(false); const [mobile, setMobile] = useState(false); const [bell, setBell] = useState(false); const [q, setQ] = useState('');
   const loc = useLocation(); const nav2 = useNavigate(); const db = useDB();
-  const notes = myNotifications(db.notifications, user); const unread = notes.filter(n => !n.read).length;
+  const notes = myNotifications(db.notifications, user).filter(n => !n.disabled); const unread = notes.filter(n => !n.read).length;
   const visible = nav.map(g => ({ ...g, items: g.items.filter(i => !i.perm || can(user, i.perm)) })).filter(g => g.items.length);
   const flat = visible.flatMap(g => g.items.map(i => ({ ...i, group: g.group })));
   const current = [...flat].sort((a, b) => b.to.length - a.to.length).find(i => loc.pathname.startsWith(i.to));
