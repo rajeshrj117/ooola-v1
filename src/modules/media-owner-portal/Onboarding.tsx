@@ -26,6 +26,15 @@ const STEPS: { title: string; fields: FieldDef[] }[] = [
     { name: 'gst', label: 'GSTIN (optional)', upper: true, placeholder: '33ABCDE1234F1Z5', pattern: /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, patternMsg: 'Invalid GSTIN (15 characters)' },
     { name: 'licenceNo', label: 'Advertising licence no. (optional)', full: true, help: 'Municipal / corporation outdoor advertising licence, if any' },
   ] },
+  { title: 'Bank Account Details', fields: [
+    { name: 'bankAccountHolder', label: 'Account holder name', full: true, required: true, help: 'As per bank records' },
+    { name: 'bankName', label: 'Bank name', required: true },
+    { name: 'bankAccountType', label: 'Account type', type: 'select', options: ['Current', 'Savings'], required: true },
+    { name: 'bankAccountNumber', label: 'Account number', required: true, placeholder: '9–18 digits', pattern: /^\d{9,18}$/, patternMsg: 'Account number must be 9–18 digits' },
+    { name: 'confirmAccountNumber', label: 'Confirm account number', required: true, placeholder: 'Re-enter account number' },
+    { name: 'bankIfsc', label: 'IFSC code', required: true, upper: true, placeholder: 'HDFC0001234', pattern: /^[A-Z]{4}0[A-Z0-9]{6}$/, patternMsg: 'Invalid IFSC (format HDFC0001234)' },
+    { name: 'bankBranch', label: 'Branch (optional)' },
+  ] },
   { title: 'Contact Details', fields: [
     { name: 'name', label: 'Contact person', required: true },
     { name: 'email', label: 'Email', type: 'email', required: true },
@@ -33,8 +42,8 @@ const STEPS: { title: string; fields: FieldDef[] }[] = [
     { name: 'altPhone', label: 'Alternate phone (optional)', type: 'phone' },
   ] },
 ];
-const VERIFY = 4, REVIEW = 5;
-const ALL = ['Company Details', 'Business Address', 'Legal Registration', 'Contact Details', 'Owner Verification', 'Review & Submit'];
+const VERIFY = 5, REVIEW = 6;
+const ALL = ['Company Details', 'Business Address', 'Legal Registration', 'Bank Details', 'Contact Details', 'Owner Verification', 'Review & Submit'];
 
 const splitPhone = (p?: string) => { const m = (p || '').match(/^(\+\d{1,3})\s*(.*)$/); return m ? { code: m[1], num: m[2].replace(/\D/g, '') } : { code: '+91', num: (p || '').replace(/\D/g, '') }; };
 
@@ -42,30 +51,31 @@ export function OwnerOnboarding() {
   const u = useSession(); const db = useDB();
   const me = db.owners.find(o => o.id === u?.ownerId);
   const [step, setStep] = useState(0);
-  const [v, setV] = useState<any>(() => { if (!me) return {}; const p = splitPhone(me.phone); return { ...me, phone: p.num, phoneCode: p.code, altPhone: splitPhone(me.altPhone).num, altPhoneCode: splitPhone(me.altPhone).code }; });
+  const [v, setV] = useState<any>(() => { if (!me) return {}; const p = splitPhone(me.phone); return { ...me, confirmAccountNumber: me.bankAccountNumber || '', phone: p.num, phoneCode: p.code, altPhone: splitPhone(me.altPhone).num, altPhoneCode: splitPhone(me.altPhone).code }; });
   const [e, setE] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   if (!u || u.role !== 'Media Owner' || !me || me.onboardingComplete) return null;
 
   const set = (k: string, x: any) => setV((p: any) => ({ ...p, [k]: x }));
   const verifyErrors = () => { const er: Record<string, string> = {}; if (!v.idType) er.idType = 'Select an ID type'; if (!v.idUploaded) er.idUploaded = 'Upload the document (simulated)'; if (!v.consent) er.consent = 'Please accept the declaration'; return er; };
-  const next = () => { const er = step < VERIFY ? validate(STEPS[step].fields, v) : step === VERIFY ? verifyErrors() : {}; setE(er); if (Object.keys(er).length) return; setStep(step + 1); };
+  const stepErrors = (i: number) => { const er = validate(STEPS[i].fields, v); if (STEPS[i].fields.some(f => f.name === 'confirmAccountNumber') && !er.confirmAccountNumber && v.confirmAccountNumber !== v.bankAccountNumber) er.confirmAccountNumber = 'Account numbers do not match'; return er; };
+  const next = () => { const er = step < VERIFY ? stepErrors(step) : step === VERIFY ? verifyErrors() : {}; setE(er); if (Object.keys(er).length) return; setStep(step + 1); };
   const back = () => { setE({}); setStep(step - 1); };
   const submit = async () => {
     setBusy(true);
     const phone = `${v.phoneCode || '+91'} ${v.phone}`; const altPhone = v.altPhone ? `${v.altPhoneCode || '+91'} ${v.altPhone}` : '';
-    const { consent, phoneCode, altPhoneCode, ...rest } = v;
+    const { consent, phoneCode, altPhoneCode, confirmAccountNumber, ...rest } = v;
     await api.update('owners', me.id, { ...rest, phone, altPhone, onboardingComplete: true, onboardedAt: new Date().toISOString() }, 'Owner onboarding completed');
     toast('Onboarding complete — welcome to Oolaa!'); setBusy(false);
   };
 
-  const reviewRows = (i: number) => STEPS[i].fields.map(f => [f.label.replace(' (optional)', ''), f.type === 'phone' ? (v[f.name] ? `${v[f.name + 'Code'] || '+91'} ${v[f.name]}` : '—') : (v[f.name] || '—')]);
+  const reviewRows = (i: number) => STEPS[i].fields.map(f => [f.label.replace(' (optional)', ''), f.type === 'phone' ? (v[f.name] ? `${v[f.name + 'Code'] || '+91'} ${v[f.name]}` : '—') : f.name === 'bankAccountNumber' && v[f.name] ? '•'.repeat(Math.max(v[f.name].length - 4, 0)) + String(v[f.name]).slice(-4) : f.name === 'confirmAccountNumber' ? null : (v[f.name] || '—')]).filter(r => r[1] !== null);
 
   return <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/70 backdrop-blur-sm p-0 sm:p-4">
     <div className="bg-white w-full sm:max-w-3xl sm:rounded-2xl shadow-2xl max-h-[100vh] sm:max-h-[94vh] flex flex-col">
       <div className="px-5 pt-5 pb-4 border-b">
         <h2 className="text-lg font-bold">Complete your media owner profile</h2>
-        <p className="text-sm text-slate-500">Finish these 6 steps to access your portal.</p>
+        <p className="text-sm text-slate-500">Finish these 7 steps to access your portal.</p>
         <ol className="mt-4 flex items-start">{ALL.map((t, i) => <li key={t} className="flex-1 flex flex-col items-center text-center relative">
           {i > 0 && <span className={cn('absolute top-3.5 right-1/2 w-full h-0.5 -z-0', i <= step ? 'bg-orange-500' : 'bg-slate-200')} />}
           <span className={cn('relative z-10 w-7 h-7 rounded-full grid place-items-center text-xs font-bold', i < step ? 'bg-orange-500 text-white' : i === step ? 'bg-orange-500 text-white ring-4 ring-orange-100' : 'bg-slate-200 text-slate-500')}>{i < step ? <Check size={14} /> : i + 1}</span>
@@ -73,6 +83,7 @@ export function OwnerOnboarding() {
       </div>
       <div className="p-5 overflow-y-auto flex-1">
         <h3 className="font-semibold mb-3">{step + 1}. {ALL[step]}</h3>
+        {step === 3 && <div className="mb-4"><Notice>Used for supplier payments. Bank details are simulated in this demo — do not enter a real account number.</Notice></div>}
         {step < VERIFY && <FormFields fields={STEPS[step].fields} value={v} set={set} errors={e} />}
         {step === VERIFY && <div className="space-y-4">
           <Notice>Verification is simulated in this demo. Do not upload or enter real identity documents.</Notice>
@@ -86,12 +97,12 @@ export function OwnerOnboarding() {
         {step === REVIEW && <div className="space-y-3">
           {STEPS.map((s, i) => <div key={s.title} className="border rounded-xl p-4"><div className="flex justify-between items-center mb-2"><b className="text-sm">{i + 1}. {s.title}</b><button className="text-xs text-orange-600 hover:underline" onClick={() => setStep(i)}>Edit</button></div>
             <dl className="grid sm:grid-cols-2 gap-x-6 gap-y-1 text-sm">{reviewRows(i).map(([k, val]) => <div key={k} className="flex gap-2"><dt className="text-slate-500 shrink-0">{k}:</dt><dd className="break-words min-w-0">{val}</dd></div>)}</dl></div>)}
-          <div className="border rounded-xl p-4"><div className="flex justify-between items-center mb-1"><b className="text-sm">5. Owner Verification</b><button className="text-xs text-orange-600 hover:underline" onClick={() => setStep(VERIFY)}>Edit</button></div><div className="text-sm">{v.idType} — document attached (simulated)</div></div>
+          <div className="border rounded-xl p-4"><div className="flex justify-between items-center mb-1"><b className="text-sm">6. Owner Verification</b><button className="text-xs text-orange-600 hover:underline" onClick={() => setStep(VERIFY)}>Edit</button></div><div className="text-sm">{v.idType} — document attached (simulated)</div></div>
         </div>}
       </div>
       <div className="px-5 py-3 border-t bg-slate-50 sm:rounded-b-2xl flex justify-between items-center">
         <Button variant="outline" onClick={back} disabled={step === 0}>Back</Button>
-        <span className="text-xs text-slate-400">Step {step + 1} of 6</span>
+        <span className="text-xs text-slate-400">Step {step + 1} of 7</span>
         {step < REVIEW ? <Button onClick={next}>Next</Button> : <Button onClick={submit} disabled={busy}>Submit & enter portal</Button>}
       </div>
     </div></div>;

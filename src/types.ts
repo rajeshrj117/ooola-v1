@@ -10,7 +10,7 @@ export interface Asset {
   rate: number; supplierRate: number; refNo?: string; mrp?: number; agencyRate?: number; minDays: number; capacity: number; images: string[]; verification: VerificationStatus;
   availability: 'Available' | 'Held' | 'Booked' | 'Blocked'; traffic: string; panels: number; blocks: DateBlock[]; verificationNote?: string;
 }
-export interface MediaOwner { id: string; name: string; company: string; email: string; phone: string; address: string; city: string; businessType: string; verification: 'Pending' | 'Verified (simulated)' | 'Rejected'; agreement: 'Not Sent' | 'Sent' | 'Signed (simulated)'; phoneCode?: string; altPhone?: string; website?: string; yearEstablished?: string; state?: string; pincode?: string; landmark?: string; pan?: string; gst?: string; licenceNo?: string; idType?: string; idUploaded?: boolean; onboardingComplete?: boolean; onboardedAt?: string; }
+export interface MediaOwner { id: string; name: string; company: string; email: string; phone: string; address: string; city: string; businessType: string; verification: 'Pending' | 'Verified (simulated)' | 'Rejected'; agreement: 'Not Sent' | 'Sent' | 'Signed (simulated)'; phoneCode?: string; altPhone?: string; website?: string; yearEstablished?: string; state?: string; pincode?: string; landmark?: string; pan?: string; gst?: string; licenceNo?: string; bankAccountHolder?: string; bankName?: string; bankAccountNumber?: string; bankIfsc?: string; bankBranch?: string; bankAccountType?: string; idType?: string; idUploaded?: boolean; onboardingComplete?: boolean; onboardedAt?: string; }
 export interface Contact { disabled?: boolean; name: string; email: string; role: string; }
 export interface Customer { id: string; company: string; contact: string; email: string; phone: string; city: string; industry: string; gstin: string; contacts: Contact[]; }
 export interface Brand { disabled?: boolean; id: string; customerId: string; name: string; category: string; }
@@ -21,7 +21,7 @@ export interface Quotation {
   disabled?: boolean;
   id: string; number: string; campaignId: string; customerId: string; status: QuoteStatus; items: QuoteItem[];
   production: number; installation: number; service: number; productionCost: number; installationCost: number; otherCost: number;
-  discount: number; taxRate: number; expiry: string; createdAt: string; notes: string; internalApproved?: boolean;
+  discount: number; taxRate: number; expiry: string; createdAt: string; notes: string; internalApproved?: boolean; ownerApprovals?: string[];
 }
 export type BookingStatus = 'Enquiry' | 'Quotation in Progress' | 'Quotation Sent' | 'Awaiting Customer Approval' | 'Awaiting Supplier Confirmation' | 'Confirmed' | 'Artwork Pending' | 'Scheduled' | 'Installation in Progress' | 'Live' | 'Completed' | 'Cancelled';
 export interface Booking { id: string; number: string; quotationId: string; campaignId: string; customerId: string; assetId: string; ownerId: string; start: string; end: string; amount: number; supplierCost: number; status: BookingStatus; createdAt: string; }
@@ -51,7 +51,7 @@ export interface Dispute {
   assignee: string; resolution: string; createdAt: string; updatedAt: string; slaDue: string; thread: DisputeMessage[];
 }
 export const MAX_PHOTOS = 5;
-export interface User { id: string; name: string; email: string; role: Role; ownerId?: string; customerId?: string; active: boolean; }
+export interface User { id: string; name: string; email: string; role: Role; ownerId?: string; customerId?: string; active: boolean; password?: string; }
 export interface Notification { disabled?: boolean; id: string; audience: 'internal' | 'customer' | 'owner'; targetId?: string; title: string; body: string; link: string; read: boolean; at: string; }
 export interface AuditEvent { id: string; at: string; user: string; action: string; entity: string; entityId: string; summary: string; }
 export interface Settings { companyName: string; taxRate: number; quoteValidityDays: number; currency: 'INR'; invoiceDueDays: number; gstNote: string; workflows: { requireInternalQuoteApproval: boolean; requireProofApproval: boolean; requireArtworkApproval: boolean }; }

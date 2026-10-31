@@ -152,9 +152,45 @@ export function PublicPlan() {
 const ownerFields: FieldDef[] = [{ name: 'name', label: 'Owner name', required: true }, { name: 'company', label: 'Company name', required: true }, { name: 'email', label: 'Email', type: 'email', required: true }, { name: 'phone', label: 'Phone', type: 'phone', required: true }, { name: 'pan', label: 'PAN', required: true, upper: true, placeholder: 'ABCDE1234F', pattern: /^[A-Z]{5}[0-9]{4}[A-Z]$/, patternMsg: 'Invalid PAN (format ABCDE1234F)' }, { name: 'gst', label: 'GSTIN (optional)', upper: true, placeholder: '33ABCDE1234F1Z5', pattern: /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/, patternMsg: 'Invalid GSTIN (15 characters)' }, { name: 'address', label: 'Address', full: true, required: true }, { name: 'city', label: 'City', type: 'select', options: ['Chennai', 'Bengaluru', 'Hyderabad', 'Coimbatore', 'Other'], required: true }, { name: 'businessType', label: 'Business type', type: 'select', options: ['Private Limited', 'Proprietorship', 'Partnership', 'LLP'], required: true }];
 const GoogleIcon = () => <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 13 4 4 13 4 24s9 20 20 20 20-9 20-20c0-1.3-.1-2.6-.4-3.9z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 8 3l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-8l-6.5 5C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.300-.1-2.600-.4-3.900z"/></svg>;
 const FacebookIcon = () => <svg width="20" height="20" viewBox="0 0 24 24"><path fill="#1877F2" d="M24 12a12 12 0 1 0-13.900 11.900v-8.400H7.100V12h3V9.400c0-3 1.800-4.700 4.500-4.700 1.300 0 2.700.2 2.700.2v3h-1.500c-1.500 0-2 .9-2 1.900V12h3.400l-.5 3.500h-2.900v8.400A12 12 0 0 0 24 12z"/></svg>;
+/** Demo-only forgot-password flow: email -> (simulated) reset link -> new password. No real email is sent and no password is stored. */
+function ForgotPassword({ onClose, initialEmail = '' }: { onClose: () => void; initialEmail?: string }) {
+  const [step, setStep] = useState<'email' | 'sent' | 'reset' | 'done'>('email');
+  const [email, setEmail] = useState(initialEmail); const [pw, setPw] = useState(''); const [pw2, setPw2] = useState('');
+  const [err, setErr] = useState(''); const [busy, setBusy] = useState(false);
+  const sendLink = async () => {
+    if (!/^\S+@\S+\.\S+$/.test(email.trim())) return setErr('Enter a valid email address');
+    setErr(''); setBusy(true); await new Promise(r => setTimeout(r, 600)); setBusy(false); setStep('sent');
+  };
+  const savePw = async () => {
+    if (pw.length < 8) return setErr('Password must be at least 8 characters');
+    if (pw !== pw2) return setErr('Passwords do not match');
+    setErr(''); setBusy(true); await new Promise(r => setTimeout(r, 600)); setBusy(false); setStep('done'); toast('Password updated (demo)');
+  };
+  return <Modal open onClose={onClose} title="Forgot password?">
+    {step === 'email' && <div className="space-y-3">
+      <p className="text-sm text-slate-500">Enter the email you registered with and we will send you a link to reset your password.</p>
+      <Field label="Email address" error={err}><Input type="email" autoFocus value={email} onChange={(e: any) => setEmail(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && sendLink()} placeholder="you@company.com" /></Field>
+      <Button className="w-full" loading={busy} onClick={sendLink}>Send reset link</Button>
+      <Notice>Simulated in this demo. No real email is sent.</Notice></div>}
+    {step === 'sent' && <div className="text-center py-4"><CheckCircle2 className="mx-auto text-emerald-500" size={44} />
+      <h4 className="font-bold mt-3">Check your inbox</h4>
+      <p className="text-sm text-slate-500 mt-1">If an account exists for <b>{email.trim()}</b>, a reset link has been sent. It stays valid for 30 minutes.</p>
+      <Button className="w-full mt-5" onClick={() => setStep('reset')}>Open reset link (demo)</Button>
+      <button className="text-sm text-orange-600 hover:underline mt-3" onClick={() => setStep('email')}>Use a different email</button></div>}
+    {step === 'reset' && <div className="space-y-3">
+      <p className="text-sm text-slate-500">Choose a new password for <b>{email.trim()}</b>.</p>
+      <Field label="New password"><Input type="password" autoFocus value={pw} onChange={(e: any) => setPw(e.target.value)} /></Field>
+      <Field label="Confirm new password" error={err}><Input type="password" value={pw2} onChange={(e: any) => setPw2(e.target.value)} onKeyDown={(e: any) => e.key === 'Enter' && savePw()} /></Field>
+      <Button className="w-full" loading={busy} onClick={savePw}>Update password</Button></div>}
+    {step === 'done' && <div className="text-center py-4"><CheckCircle2 className="mx-auto text-emerald-500" size={44} />
+      <h4 className="font-bold mt-3">Password updated</h4><p className="text-sm text-slate-500 mt-1">You can now sign in with your new password.</p>
+      <Button className="w-full mt-5" onClick={onClose}>Back to sign in</Button></div>}
+  </Modal>;
+}
+
 export function ListYourSpace() {
   const [v, setV] = useState<any>({}); const [e, setE] = useState<any>({}); const [done, setDone] = useState(false);
-  const [auth, setAuth] = useState<null | 'Google' | 'Facebook' | 'Email'>(null); const [em, setEm] = useState(''); const [emErr, setEmErr] = useState('');
+  const [auth, setAuth] = useState<null | 'Google' | 'Facebook' | 'Email'>(null); const [em, setEm] = useState(''); const [emErr, setEmErr] = useState(''); const [forgot, setForgot] = useState(false);
   // Demo-only simulated social sign-in. Replace with real Firebase/OAuth later.
   const signIn = (provider: 'Google' | 'Facebook') => { setAuth(provider); setV((x: any) => ({ ...x, email: provider === 'Google' ? 'demo.owner@gmail.com' : 'demo.owner@facebook.com', authProvider: provider })); toast(`Signed in with ${provider} (demo)`); };
   const emailContinue = () => { if (!/^\S+@\S+\.\S+$/.test(em.trim())) return setEmErr('Enter a valid email address'); setEmErr(''); setAuth('Email'); setV((x: any) => ({ ...x, email: em.trim(), authProvider: 'Email' })); };
@@ -169,23 +205,27 @@ export function ListYourSpace() {
       <div className="flex items-center gap-3 my-5 text-xs text-slate-400"><div className="flex-1 border-t" />OR<div className="flex-1 border-t" /></div>
       <input type="email" value={em} onChange={e => setEm(e.target.value)} onKeyDown={e => e.key === 'Enter' && emailContinue()} placeholder="Email address" className="w-full rounded-xl border border-slate-300 px-4 py-3" />
       {emErr && <div className="text-sm text-rose-600 mt-1">{emErr}</div>}
+      <div className="text-right mt-2"><button type="button" className="text-sm text-orange-600 hover:underline" onClick={() => setForgot(true)}>Forgot password?</button></div>
       <Button className="w-full mt-3" onClick={emailContinue}>Continue with email</Button>
       <div className="mt-5"><Notice>Sign-in is simulated in this demo. No real Google, Facebook or email account is used.</Notice></div></div> : done ? <div className="text-center py-10"><CheckCircle2 className="mx-auto text-emerald-500" size={48} /><h2 className="text-xl font-bold mt-3">Registration received</h2><p className="text-sm text-slate-500 mt-1">Our team will review your details (simulated). Meanwhile, explore the owner portal with the demo account.</p><Link to="/login"><Button className="mt-5">Open demo owner portal</Button></Link></div> : <>
       <div className="flex items-center justify-between mb-4"><h2 className="font-semibold text-lg">Media owner registration</h2><span className="text-xs text-slate-500">Signed in with {auth} · <button className="text-orange-600 hover:underline" onClick={() => { setAuth(null); setV({}); }}>Change</button></span></div><FormFields fields={ownerFields} value={v} set={(k, x) => setV({ ...v, [k]: x })} errors={e} />
       <div className="mt-4"><Notice>Identity/business verification is simulated in this demo. Do not upload or enter real identity documents.</Notice></div>
-      <Button className="w-full mt-4" onClick={submit}>Submit registration</Button></>}</Card></div>;
+      <Button className="w-full mt-4" onClick={submit}>Submit registration</Button></>}</Card>
+    {forgot && <ForgotPassword initialEmail={em} onClose={() => setForgot(false)} />}</div>;
 }
 
 export function Login() {
-  const db = useDB(); const nav = useNavigate(); const [email, setEmail] = useState(''); const [pw, setPw] = useState('demo'); const [err, setErr] = useState('');
+  const db = useDB(); const nav = useNavigate(); const [email, setEmail] = useState(''); const [pw, setPw] = useState('demo'); const [err, setErr] = useState(''); const [forgot, setForgot] = useState(false);
   const go = (em: string) => { const u = db.users.find(x => x.email.toLowerCase() === em.toLowerCase() && x.active); if (!u) return setErr('Unknown or inactive demo account'); setSession(u); toast(`Signed in as ${u.role}`); nav(homeFor(u)); };
   const quick = [['admin@oolaa.demo', 'Super Admin', 'Full command centre'], ['operations@oolaa.demo', 'Operations', 'Inventory, verification, ops'], ['sales@oolaa.demo', 'Sales', 'Customers & quotations (no costs)'], ['finance@oolaa.demo', 'Finance', 'Invoices, payments, margins'], ['owner@oolaa.demo', 'Media Owner', 'Skyline Media Works'], ['customer@oolaa.demo', 'Customer', 'Kaveri Foods']];
   return <div className="max-w-5xl mx-auto px-4 py-12 grid md:grid-cols-2 gap-8 items-start">
     <Card className="p-6"><h1 className="text-2xl font-bold">Demo sign in</h1><p className="text-sm text-slate-500 mb-4">Fictional demo identities. Any password works.</p>
       <Field label="Email"><Input value={email} onChange={(e: any) => setEmail(e.target.value)} placeholder="admin@oolaa.demo" /></Field>
       <Field label="Password" className="mt-3"><Input type="password" value={pw} onChange={(e: any) => setPw(e.target.value)} /></Field>
+      <div className="text-right mt-1"><button type="button" className="text-sm text-orange-600 hover:underline" onClick={() => setForgot(true)}>Forgot password?</button></div>
       {err && <div className="text-sm text-rose-600 mt-2">{err}</div>}<Button className="w-full mt-4" onClick={() => go(email)}>Sign in</Button>
       <div className="mt-4"><Notice>Browser-side role permissions are for demonstration only and do not provide production-grade security.</Notice></div></Card>
+    {forgot && <ForgotPassword initialEmail={email} onClose={() => setForgot(false)} />}
     <div><h2 className="font-semibold mb-3">One-click demo accounts</h2><div className="grid sm:grid-cols-2 gap-3">{quick.map(([e, r, d]) => <button key={e} onClick={() => go(e)} className="text-left p-4 rounded-2xl border bg-white hover:border-orange-400 hover:shadow-md transition"><div className="font-semibold">{r}</div><div className="text-xs text-slate-500">{d}</div><div className="text-[11px] text-orange-600 mt-2">{e}</div></button>)}</div></div>
   </div>;
 }

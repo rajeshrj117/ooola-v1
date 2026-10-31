@@ -34,7 +34,7 @@ export interface CrudProps<R extends { id: string }> {
   title: string; subtitle?: string; collection: CollectionKey; rows: R[]; cols: Col<R>[]; fields: FieldDef[]; defaults?: Partial<R>;
   canCreate?: boolean; canEdit?: boolean | ((r: R) => boolean); canDelete?: boolean; deleteCheck?: (r: R) => string | null;
   filters?: { key: string; label: string; options: string[] }[]; searchKeys?: string[]; toRecord?: (form: any, prev?: R) => any; csvName?: string;
-  extra?: (r: R) => ReactNode; onRow?: (r: R) => void; headerExtra?: ReactNode; entityLabel?: string; prefix?: string;
+  extra?: (r: R) => ReactNode; extraEnd?: (r: R) => ReactNode; onRow?: (r: R) => void; headerExtra?: ReactNode; entityLabel?: string; prefix?: string;
 }
 export function CrudPage<R extends { id: string }>(p: CrudProps<R>) {
   const [q, setQ] = useState(''); const [flt, setFlt] = useState<Record<string, string>>({});
@@ -54,7 +54,7 @@ export function CrudPage<R extends { id: string }>(p: CrudProps<R>) {
   };
   const toggle = (r: R) => toggleDisabled(p.collection, r as any, label);
   const editable = (r: R) => typeof p.canEdit === 'function' ? p.canEdit(r) : p.canEdit !== false;
-  const cols: Col<R>[] = [...p.cols, ...((p.canEdit !== false || p.canDelete !== false || p.extra) ? [{ key: '_a', label: '', className: 'text-right whitespace-nowrap', render: (r: R) => <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>{p.extra?.(r)}{editable(r) && <Button size="sm" variant="ghost" onClick={() => open(r)} title="Edit"><Pencil size={14} /></Button>}{p.canDelete !== false && <>{(r as any).disabled && <DisabledTag />}<DisableBtn disabled={(r as any).disabled} onClick={() => toggle(r)} /></>}</div> }] : [])];
+  const cols: Col<R>[] = [...p.cols, ...((p.canEdit !== false || p.canDelete !== false || p.extra || p.extraEnd) ? [{ key: '_a', label: '', className: 'text-right whitespace-nowrap', render: (r: R) => <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>{p.extra?.(r)}{editable(r) && <Button size="sm" variant="ghost" onClick={() => open(r)} title="Edit"><Pencil size={14} /></Button>}{p.canDelete !== false && <>{(r as any).disabled && <DisabledTag />}<DisableBtn disabled={(r as any).disabled} onClick={() => toggle(r)} /></>}{p.extraEnd?.(r)}</div> }] : [])];
   return <div>
     <PageHeader title={p.title} subtitle={p.subtitle} actions={<>{p.headerExtra}<ExportBtn onClick={() => exportCSV(p.csvName || p.collection, rows.map(r => Object.fromEntries(p.cols.map(c => [c.label, c.csv ? c.csv(r) : (r as any)[c.key]]))))} />{p.canCreate !== false && <Button onClick={() => open('new')}><Plus size={16} />New {label}</Button>}</>} />
     <Card>

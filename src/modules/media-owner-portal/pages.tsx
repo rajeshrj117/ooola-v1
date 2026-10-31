@@ -1,10 +1,10 @@
 import { useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell, Legend } from 'recharts';
-import { Building2, ShieldQuestion, CheckCircle2, CalendarClock, BookmarkCheck, Inbox, Wrench, ShoppingCart, IndianRupee, Plus, Pencil, CalendarDays, Send, Upload, X, Check } from 'lucide-react';
+import { Building2, ShieldQuestion, CheckCircle2, CalendarClock, BookmarkCheck, Inbox, Wrench, ShoppingCart, IndianRupee, Plus, Pencil, CalendarDays, Send, Upload, X, Check, Eye, AlertCircle } from 'lucide-react';
 import { useDB, useSession, api, saveFile, fileToThumb } from '../../services/storage.service';
-import { confirmPO, rejectPO } from '../../services/workflows';
-import { Button, Card, Badge, Stat, PageHeader, Table, Modal, Select, inputCls, toast, toastErr, Empty, Notice, promptDialog } from '../../components/ui';
+import { confirmPO, rejectPO, reviewQuotationRequest } from '../../services/workflows';
+import { Button, Card, Badge, Stat, PageHeader, Table, Modal, Select, inputCls, toast, toastErr, Empty, Notice, promptDialog, confirmDialog } from '../../components/ui';
 import { AvailabilityCalendar, MapView, assetName, catName, custName } from '../../components/shared';
 import { FormFields, validate, type FieldDef } from '../../components/CrudPage';
 import { ProofUpload } from '../operations/common';
@@ -14,9 +14,14 @@ import { MAX_PHOTOS, type Asset } from '../../types';
 const ACTIVE_BOOKING = ['Awaiting Supplier Confirmation', 'Confirmed', 'Artwork Pending', 'Scheduled', 'Installation in Progress', 'Live'];
 
 const useOwner = () => { const u = useSession()!; const db = useDB(); return { u, db, oid: u.ownerId!, me: db.owners.find(o => o.id === u.ownerId)! }; };
+// Safe campaign-name lookup used by owner quotation request lists and details.
+const campName = (db: { campaigns: Array<{ id: string; name: string }> }, campaignId: string) =>
+  db.campaigns.find(c => c.id === campaignId)?.name || 'Campaign request';
 
 export function OwnerDashboard() {
   const { db, oid, me } = useOwner(); const as = db.assets.filter(a => a.ownerId === oid); const bk = db.bookings.filter(b => b.ownerId === oid); const pos = db.purchaseOrders.filter(p => p.ownerId === oid);
+  const ownerQuoteRequests = db.quotations.filter(q => ['Requested', 'Revision Requested'].includes(q.status) && q.items.some(it => db.assets.some(a => a.id === it.assetId && a.ownerId === oid)));
+  const ownerPendingReview = ownerQuoteRequests.filter(q => !(q.ownerApprovals || []).includes(oid));
   const ins = db.installations.filter(i => i.supplierId === oid && i.status !== 'Completed'); const nav = useNavigate();
   const active = pos.filter(p => ['Confirmed', 'In Execution'].includes(p.status));
   const months = (() => { const m: Record<string, number> = {}; pos.filter(p => !['Rejected', 'Draft'].includes(p.status)).forEach(p => { const k = p.createdAt.slice(0, 7); m[k] = (m[k] || 0) + poTotals(p, db).total; }); return Object.keys(m).sort().slice(-6).map(k => ({ month: new Date(k + '-01').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' }), value: m[k] })); })();
@@ -29,9 +34,10 @@ export function OwnerDashboard() {
       <Stat icon={Building2} label="Total listed assets" value={as.length} /><Stat icon={ShieldQuestion} label="Pending verification" value={as.filter(a => ['Submitted', 'Under Review', 'Needs More Information'].includes(a.verification)).length} tone="violet" />
       <Stat icon={CheckCircle2} label="Available assets" value={as.filter(a => a.availability === 'Available').length} tone="green" /><Stat icon={CalendarClock} label="Reserved (held)" value={bk.filter(b => b.status === 'Awaiting Supplier Confirmation').length} tone="orange" />
       <Stat icon={BookmarkCheck} label="Confirmed bookings" value={bk.filter(b => ['Confirmed', 'Artwork Pending', 'Scheduled', 'Installation in Progress', 'Live'].includes(b.status)).length} tone="blue" />
-      <Stat icon={Inbox} label="Pending enquiries / POs" value={pos.filter(p => p.status === 'Sent').length} tone="red" /><Stat icon={Wrench} label="Installation pending" value={ins.length} tone="slate" /><Stat icon={ShoppingCart} label="Active orders" value={active.length} tone="blue" />
+      <Stat icon={Inbox} label="Pending requests / POs" value={ownerPendingReview.length + pos.filter(p => p.status === 'Sent').length} tone="red" /><Stat icon={Wrench} label="Installation pending" value={ins.length} tone="slate" /><Stat icon={ShoppingCart} label="Active orders" value={active.length} tone="blue" />
       <Stat icon={ShoppingCart} label="Purchase orders" value={pos.length} /><Stat icon={IndianRupee} label="Estimated earnings" value={inr(earn)} tone="green" hint={`${inr(paid)} received (simulated)`} />
     </div>
+    <Card className="mt-4 p-4"><div className="flex items-center justify-between gap-2 mb-2"><h3 className="font-semibold">Quotation requests awaiting your review</h3><Link to="/owner/quotation-requests" className="text-xs text-orange-600">Review requests →</Link></div>{ownerPendingReview.slice(0, 4).map(q => { const c = db.campaigns.find(x => x.id === q.campaignId); const assetNames = q.items.filter(it => db.assets.some(a => a.id === it.assetId && a.ownerId === oid)).map(it => db.assets.find(a => a.id === it.assetId)?.name).join(', '); return <div key={q.id} className="flex justify-between items-center py-2 border-b text-sm gap-3"><div><b>{q.number} · {c?.name || 'Campaign request'}</b><div className="text-xs text-slate-500">{custName(db, q.customerId)} · {assetNames}</div></div><Button size="sm" onClick={() => nav('/owner/quotation-requests')}>Review</Button></div>; })}{!ownerPendingReview.length && <Empty title="No quotation requests awaiting review" body="New customer requests for your advertising assets will appear here." />}</Card>
     <Card className="mt-4 p-4"><h3 className="font-semibold mb-2">Orders awaiting your confirmation</h3>{pos.filter(p => p.status === 'Sent').map(p => <div key={p.id} className="flex justify-between items-center py-2 border-b text-sm"><span>{p.number} · {p.items[0]?.desc}</span><b>{inr(poTotals(p, db).total)}</b></div>)}{!pos.some(p => p.status === 'Sent') && <Empty title="No pending orders" />}</Card>
     <div className="grid lg:grid-cols-2 gap-4 mt-4">
       <Card className="p-4"><div className="flex justify-between items-center mb-2"><h3 className="font-semibold">Installation pending</h3><Link to="/owner/proofs" className="text-xs text-orange-600">Upload proof</Link></div>{ins.map(i => <div key={i.id} className="flex justify-between items-center py-2 border-b text-sm gap-2"><div className="min-w-0"><div className="truncate font-medium">{assetName(db, i.assetId)}</div><div className="text-xs text-slate-400">Scheduled {fmtDate(i.scheduled)}</div></div><Badge>{i.status}</Badge></div>)}{!ins.length && <Empty title="No installations pending" />}</Card>
@@ -116,6 +122,45 @@ export function CalendarPage({ assets, editable = true, title = 'Availability ca
 }
 export function OwnerCalendar() { const { db, oid } = useOwner(); return <CalendarPage assets={db.assets.filter(a => a.ownerId === oid)} />; }
 
+export function OwnerQuotationRequests() {
+  const { db, oid } = useOwner();
+  const [viewId, setViewId] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const requests = db.quotations.filter(q => q.items.some(it => db.assets.some(a => a.id === it.assetId && a.ownerId === oid)));
+  const pending = requests.filter(q => ['Requested', 'Revision Requested'].includes(q.status) && !(q.ownerApprovals || []).includes(oid));
+  const reviewed = requests.filter(q => ['Requested', 'Revision Requested'].includes(q.status) && (q.ownerApprovals || []).includes(oid));
+  const selected = requests.find(q => q.id === viewId);
+  const approve = async (id: string) => {
+    if (!(await confirmDialog('Approve asset availability?', 'This confirms that you have reviewed the requested dates for your asset. Sales will send the final quotation after all relevant media owners approve. It does not confirm the booking yet.', false))) return;
+    setBusyId(id); try { await reviewQuotationRequest(id, 'approve'); toast('Availability approved. Sales can send the quotation after all owners review it.'); } catch (e) { toastErr(e); } finally { setBusyId(null); }
+  };
+  const reject = async (id: string) => {
+    const reason = await promptDialog('Reject quotation request', 'Enter the reason (for example, unavailable dates or asset restrictions).');
+    if (!reason) return;
+    setBusyId(id); try { await reviewQuotationRequest(id, 'reject', reason); toast('Quotation request rejected and customer notified.'); setViewId(null); } catch (e) { toastErr(e); } finally { setBusyId(null); }
+  };
+  return <div><PageHeader title="Quotation requests" subtitle="Review requests for your assets, check dates, and approve or reject availability" actions={<Badge>{pending.length} awaiting review</Badge>} />
+    <Notice tone="blue"><div><b>Your approval checks availability only.</b> After all involved media owners approve, the sales team sends the final quotation to the customer. The customer can then accept it, and a purchase order will be created for your confirmation.</div></Notice>
+    <Card className="mt-4"><Table rows={pending} onRow={q => setViewId(q.id)} empty={<Empty title="No quotation requests awaiting review" body="New requests for your advertising assets will appear here when customers submit campaign plans." />} cols={[
+      { key: 'number', label: 'REQUEST', render: q => <b>{q.number}</b> },
+      { key: 'customer', label: 'CUSTOMER', render: q => custName(db, q.customerId) },
+      { key: 'campaign', label: 'CAMPAIGN', render: q => campName(db, q.campaignId) },
+      { key: 'assets', label: 'YOUR ASSETS', render: q => q.items.filter(it => db.assets.some(a => a.id === it.assetId && a.ownerId === oid)).map(it => db.assets.find(a => a.id === it.assetId)?.name).join(', ') },
+      { key: 'dates', label: 'DATES', render: q => { const its = q.items.filter(it => db.assets.some(a => a.id === it.assetId && a.ownerId === oid)); return its.map(it => `${fmtDate(it.start)} – ${fmtDate(it.end)}`).join('; '); } },
+      { key: 'status', label: 'STATUS', render: q => <Badge>{q.status}</Badge> },
+      { key: 'actions', label: 'ACTIONS', render: q => <div className="flex gap-2" onClick={e => e.stopPropagation()}><Button size="sm" variant="outline" onClick={() => setViewId(q.id)}><Eye size={14} />Review</Button><Button size="sm" loading={busyId === q.id} onClick={() => approve(q.id)}><Check size={14} />Approve availability</Button></div> }
+    ]} /></Card>
+    <Card className="mt-4 p-4"><h3 className="font-semibold mb-3">Requests you've reviewed</h3>{reviewed.map(q => <div key={q.id} className="flex flex-wrap items-center justify-between gap-2 border-b py-2 text-sm"><div><b>{q.number} · {campName(db, q.campaignId)}</b><div className="text-xs text-slate-500">{custName(db, q.customerId)}</div></div><Badge>Availability approved</Badge></div>)}{!reviewed.length && <Empty title="No reviewed requests yet" />}</Card>
+    <Modal open={!!selected} onClose={() => setViewId(null)} title={selected ? `Request ${selected.number}` : 'Quotation request'} wide>{selected && <div className="space-y-4 text-sm">
+      <div className="grid md:grid-cols-2 gap-3"><div><div className="text-slate-500">Customer</div><b>{custName(db, selected.customerId)}</b></div><div><div className="text-slate-500">Campaign</div><b>{campName(db, selected.campaignId)}</b></div><div><div className="text-slate-500">Request status</div><Badge>{selected.status}</Badge></div><div><div className="text-slate-500">Expiry</div><b>{fmtDate(selected.expiry)}</b></div></div>
+      <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left border-b"><th className="py-2">Your asset</th><th>Campaign dates</th><th>Indicative media price</th><th>Availability review</th></tr></thead><tbody>{selected.items.filter(it => db.assets.some(a => a.id === it.assetId && a.ownerId === oid)).map((it, i) => { const a = db.assets.find(x => x.id === it.assetId)!; return <tr className="border-b" key={i}><td className="py-2"><b>{a.name}</b><div className="text-xs text-slate-500">{a.city} · {a.location}</div></td><td>{fmtDate(it.start)} – {fmtDate(it.end)}</td><td>{inr(it.rate)}</td><td>{(selected.ownerApprovals || []).includes(oid) ? <Badge>Approved</Badge> : <Badge>Pending</Badge>}</td></tr>; })}</tbody></table></div>
+      {selected.notes && <div><div className="text-slate-500 mb-1">Customer notes</div><p className="whitespace-pre-wrap rounded bg-slate-50 p-3">{selected.notes}</p></div>}
+      <Notice tone="amber"><div className="flex gap-2"><AlertCircle size={17} className="shrink-0" /><span>Review the dates and asset availability carefully. Approving here does not lock the inventory permanently; availability is checked again before the booking is confirmed.</span></div></Notice>
+      {['Requested', 'Revision Requested'].includes(selected.status) && !(selected.ownerApprovals || []).includes(oid) && <div className="flex flex-wrap justify-end gap-2"><Button variant="outline" onClick={() => reject(selected.id)}><X size={15} />Reject request</Button><Button loading={busyId === selected.id} onClick={() => approve(selected.id)}><Check size={15} />Approve availability</Button></div>}
+    </div>}</Modal>
+  </div>;
+}
+
 export function OwnerOrders() {
   const { db, oid } = useOwner(); const rows = db.purchaseOrders.filter(p => p.ownerId === oid); const [v, setV] = useState<string | null>(null); const po = rows.find(p => p.id === v);
   const confirm = async (id: string) => { try { await confirmPO(id); toast('Order confirmed — booking confirmed'); } catch (e) { toastErr(e); } };
@@ -140,7 +185,7 @@ export function OwnerProofs() {
       <ProofUpload installationId={i.id} assetId={i.assetId} campaignId={i.campaignId} /></Card>; })}{!ins.length && <Empty title="No installations assigned" />}</div></div>;
 }
 
-const ownerProfileFields: FieldDef[] = [{ name: 'name', label: 'Owner name', required: true }, { name: 'company', label: 'Company name', required: true }, { name: 'email', label: 'Email', type: 'email', required: true }, { name: 'phone', label: 'Phone', required: true }, { name: 'address', label: 'Address', required: true, full: true }, { name: 'city', label: 'City', required: true }, { name: 'businessType', label: 'Business type', type: 'select', options: ['Private Limited', 'Proprietorship', 'Partnership', 'LLP'] }];
+const ownerProfileFields: FieldDef[] = [{ name: 'name', label: 'Owner name', required: true }, { name: 'company', label: 'Company name', required: true }, { name: 'email', label: 'Email', type: 'email', required: true }, { name: 'phone', label: 'Phone', required: true }, { name: 'address', label: 'Address', required: true, full: true }, { name: 'city', label: 'City', required: true }, { name: 'businessType', label: 'Business type', type: 'select', options: ['Private Limited', 'Proprietorship', 'Partnership', 'LLP'] }, { name: 'bankAccountHolder', label: 'Bank account holder' }, { name: 'bankName', label: 'Bank name' }, { name: 'bankAccountType', label: 'Account type', type: 'select', options: ['Current', 'Savings'] }, { name: 'bankAccountNumber', label: 'Account number', pattern: /^\d{9,18}$/, patternMsg: 'Account number must be 9–18 digits' }, { name: 'bankIfsc', label: 'IFSC code', upper: true, pattern: /^[A-Z]{4}0[A-Z0-9]{6}$/, patternMsg: 'Invalid IFSC (format HDFC0001234)' }, { name: 'bankBranch', label: 'Branch' }];
 export function OwnerProfile() {
   const { me, oid } = useOwner(); const [v, setV] = useState<any>(me); const [e, setE] = useState<any>({});
   const save = async () => { const er = validate(ownerProfileFields, v); setE(er); if (Object.keys(er).length) return; await api.update('owners', oid, v, 'Owner profile updated'); toast('Profile saved'); };

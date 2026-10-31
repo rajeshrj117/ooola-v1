@@ -9,11 +9,12 @@ import { AssetEditor, CalendarPage } from '../media-owner-portal/pages';
 import { MapView, QuotationDoc, PrintBtn, assetName, campName, custName, ownerName, catName } from '../../components/shared';
 import { CampaignReport } from '../operations/common';
 import { DisableBtn, toggleDisabled } from '../../components/disable';
+import { BookingHistoryBtn, BookingHistoryModal } from '../../components/BookingHistory';
 import { inr, fmtDate, quoteTotals, prorate, today, addDays, conflicts, seqNo, exportCSV, BOOKING_FLOW, pct } from '../../utils';
 import type { Asset, Quotation, VerificationStatus, BookingStatus } from '../../types';
 
 export function AdminInventory() {
-  const db = useDB(); const u = useSession(); const [ed, setEd] = useState<any>(null); const [sp] = useSearchParams(); const [cal, setCal] = useState<Asset | null>(null);
+  const db = useDB(); const u = useSession(); const [ed, setEd] = useState<any>(null); const [sp] = useSearchParams(); const [cal, setCal] = useState<Asset | null>(null); const [hist, setHist] = useState<Asset | null>(null);
   const costs = can(u, 'viewCosts'); const editable = can(u, 'editInventory');
   const hl = sp.get('id');
   return <>
@@ -22,12 +23,14 @@ export function AdminInventory() {
       headerExtra={<>{hl && <Link to="/admin/inventory"><Button variant="outline" size="sm">Show all</Button></Link>}{editable && <Button onClick={() => setEd({})}><Plus size={16} />New Asset</Button>}</>}
       searchKeys={['name', 'code', 'city', 'location', 'format']} filters={[{ key: 'city', label: 'cities', options: [...new Set(db.assets.map(a => a.city))] }, { key: 'verification', label: 'statuses', options: ['Draft', 'Submitted', 'Under Review', 'Approved', 'Rejected', 'Needs More Information'] }, { key: 'availability', label: 'availability', options: ['Available', 'Held', 'Booked', 'Blocked'] }]}
       extra={a => <>{editable && <Button size="sm" variant="ghost" onClick={() => setEd(a)}>Edit</Button>}<Button size="sm" variant="ghost" onClick={() => setCal(a)}>Calendar</Button></>}
+      extraEnd={a => <BookingHistoryBtn onClick={() => setHist(a)} />}
       fields={[]} csvName="inventory"
       cols={[{ key: 'img', label: '', render: a => <img src={a.images[0]} className="w-14 h-9 rounded object-cover" />, csv: a => a.code }, { key: 'name', label: 'Asset', render: a => <div><b>{a.name}</b><div className="text-xs text-slate-400">{a.code}</div></div>, csv: a => a.name },
         { key: 'cat', label: 'Category', render: a => catName(db, a.categoryId), csv: a => catName(db, a.categoryId) }, { key: 'city', label: 'City' }, { key: 'owner', label: 'Owner', render: a => ownerName(db, a.ownerId), csv: a => ownerName(db, a.ownerId) },
         { key: 'rate', label: 'Customer rate', render: a => inr(a.rate) }, ...(costs ? [{ key: 'supplierRate', label: 'Supplier rate', render: (a: Asset) => <span className="text-rose-600">{inr(a.supplierRate)}</span> }] : []),
         { key: 'verification', label: 'Verification', render: a => <Badge>{a.verification}</Badge> }, { key: 'availability', label: 'Availability', render: a => <Badge>{a.availability}</Badge> }]} />
     <AssetEditor asset={ed} open={!!ed} onClose={() => setEd(null)} internal />
+    <BookingHistoryModal asset={hist} onClose={() => setHist(null)} showCost={costs} />
     <Modal open={!!cal} onClose={() => setCal(null)} title={cal?.name}>{cal && <CalendarInline id={cal.id} />}</Modal></>;
 }
 import { AvailabilityCalendar } from '../../components/shared';
@@ -118,12 +121,29 @@ export function QuotationBuilder() {
   const save = async (status?: Quotation['status']) => {
     if (!q.customerId || !q.campaignId) return toast('Select customer and campaign', 'error'); if (!q.items.length) return toast('Add at least one asset', 'error');
     if (q.items.some(i => i.end < i.start || i.rate < 0)) return toast('Check line item dates/rates', 'error');
-    const rec = { ...q, status: status || (q.status === 'Requested' || q.status === 'Revision Requested' || q.status === 'Expired' ? 'Draft' : q.status) } as Quotation;
+    // Saving sales pricing must not remove a customer request from the media-owner review queue.
+    // Keep workflow statuses that require owner review; only ordinary editable drafts remain Draft.
+    const reviewPending = q.status === 'Requested' || q.status === 'Revision Requested';
+    const original = existing ? db.quotations.find(x => x.id === q.id) : undefined;
+    const approvalScopeChanged = !!original && (
+      original.items.length !== q.items.length ||
+      original.items.some((item, index) => {
+        const next = q.items[index];
+        return !next || item.assetId !== next.assetId || item.start !== next.start || item.end !== next.end;
+      })
+    );
+    const rec = {
+      ...q,
+      status: status || (reviewPending ? q.status : q.status === 'Expired' ? 'Draft' : q.status),
+      // Availability approvals apply to specific assets/date ranges. If Sales changes
+      // that scope, all owners must review the revised scope again.
+      ownerApprovals: approvalScopeChanged ? [] : q.ownerApprovals,
+    } as Quotation;
     if (existing) { await api.update('quotations', q.id, rec, `Quotation ${q.number} saved`); setQ(rec); toast('Quotation saved'); return rec; }
     const created = await api.create('quotations', { ...rec, id: undefined }, 'quo', `Quotation ${q.number} created`); toast('Quotation created'); nav(`/admin/quotations/${created.id}`, { replace: true }); return created;
   };
   const send = async () => { setBusy(true); try { const r = await save(); if (r) { await sendQuotation(getDB().quotations.find(x => x.id === r.id)!); setQ({ ...r, status: 'Sent' }); toast('Sent to customer for review'); } } catch (e) { toastErr(e); } setBusy(false); };
-  const revise = async () => { const r = await api.create('quotations', { ...q, id: undefined, number: seqNo('OQ', getDB().quotations), status: 'Draft', createdAt: today(), expiry: addDays(today(), db.settings.quoteValidityDays), notes: `Revision of ${q.number}` }, 'quo', `Revision of ${q.number}`); if (q.status === 'Sent' || q.status === 'Expired' || q.status === 'Revision Requested') await api.update('quotations', q.id, { status: 'Rejected', notes: q.notes + '\nSuperseded by revision' }); toast('Revision created'); nav(`/admin/quotations/${r.id}`); setQ(structuredClone(r)); };
+  const revise = async () => { const r = await api.create('quotations', { ...q, id: undefined, number: seqNo('OQ', getDB().quotations), status: 'Requested', ownerApprovals: [], createdAt: today(), expiry: addDays(today(), db.settings.quoteValidityDays), notes: `Revision of ${q.number}` }, 'quo', `Revision of ${q.number}`); if (q.status === 'Sent' || q.status === 'Expired' || q.status === 'Revision Requested') await api.update('quotations', q.id, { status: 'Rejected', notes: q.notes + '\nSuperseded by revision' }); toast('Revision created'); nav(`/admin/quotations/${r.id}`); setQ(structuredClone(r)); };
   const custOpts = db.customers.map(c => ({ value: c.id, label: c.company }));
   const enabledAssets = db.assets.filter(a => db.categories.find(c => c.id === a.categoryId)?.enabled && !a.disabled && a.verification === 'Approved' && !q.items.some(i => i.assetId === a.id));
   return <div><Link to="/admin/quotations" className="text-sm text-slate-500">← Quotations</Link>

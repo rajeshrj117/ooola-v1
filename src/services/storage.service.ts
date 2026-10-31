@@ -10,9 +10,19 @@ const listeners = new Set<() => void>();
 
 const REQUIRED: CollectionKey[] = ['categories', 'assets', 'owners', 'customers', 'brands', 'campaigns', 'quotations', 'bookings', 'artworks', 'installations', 'proofs', 'purchaseOrders', 'invoices', 'receipts', 'supplierPayments', 'expenses', 'refunds', 'disputes', 'users', 'notifications', 'audit'];
 export function isValidDB(x: any): x is DB {
-  // migrate schema v1 backups (no disputes module) in place
-  if (x && typeof x === 'object' && x.schemaVersion === 1 && !Array.isArray(x.disputes)) { x.disputes = []; x.schemaVersion = SCHEMA_VERSION; }
-  return x && typeof x === 'object' && x.schemaVersion === SCHEMA_VERSION && x.settings && REQUIRED.every(k => Array.isArray(x[k]));
+  if (!x || typeof x !== 'object') return false;
+  // Migrate older browser demo data without discarding existing bookings or invoices.
+  if (x.schemaVersion === 1 && !Array.isArray(x.disputes)) x.disputes = [];
+  if (x.schemaVersion === 1 || x.schemaVersion === 2) {
+    if (!Array.isArray(x.disputes)) x.disputes = [];
+    if (Array.isArray(x.users)) {
+      const seededOwners = buildSeed().users.filter(u => u.role === 'Media Owner' && u.ownerId);
+      const emails = new Set(x.users.map((u: User) => u.email));
+      seededOwners.filter(u => !emails.has(u.email)).forEach(u => x.users.push(u));
+    }
+    x.schemaVersion = SCHEMA_VERSION;
+  }
+  return x.schemaVersion === SCHEMA_VERSION && x.settings && REQUIRED.every(k => Array.isArray(x[k]));
 }
 function load(): DB {
   try {

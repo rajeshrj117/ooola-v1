@@ -1,7 +1,7 @@
 import type { DB, Asset, Category, MediaOwner, Customer, Brand, Campaign, Quotation, Booking, Artwork, Installation, Proof, PurchaseOrder, Invoice, Receipt, SupplierPayment, Expense, User, Notification, Refund, Dispute, BookingStatus } from '../types';
 import { addDays, today, prorate, quoteTotals } from '../utils';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 const P = (id: number) => `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=627&w=1200`;
 export const IMAGES = [P(33644177), P(29849362), P(5102100), P(1827234), P(14780175), P(29020287), P(28119461), P(16783119)];
 
@@ -116,7 +116,8 @@ const users: User[] = [
   ['Aisha Admin', 'admin@oolaa.demo', 'Super Admin'], ['Omkar Ops', 'operations@oolaa.demo', 'Operations Manager'], ['Sana Sales', 'sales@oolaa.demo', 'Sales Manager'], ['Faisal Finance', 'finance@oolaa.demo', 'Finance Manager'],
   ['Ravi Kumar', 'owner@oolaa.demo', 'Media Owner'], ['Anitha R', 'customer@oolaa.demo', 'Customer'], ['Ajay Coordinator', 'coordinator@oolaa.demo', 'Campaign Coordinator'], ['Murugan Installer', 'install@oolaa.demo', 'Installation Staff'],
   ['Lakshmi Narayan', 'owner2@example.demo', 'Media Owner'], ['Rahul Shetty', 'marketing2@example.demo', 'Customer'], ['Selvam Installer', 'install2@oolaa.demo', 'Installation Staff'], ['Nisha Sales', 'sales2@oolaa.demo', 'Sales Manager'],
-].map(([name, email, role], i) => ({ id: `usr_${i + 1}`, name, email, role: role as User['role'], active: true, ownerId: email === 'owner@oolaa.demo' ? 'own_1' : email === 'owner2@example.demo' ? 'own_2' : undefined, customerId: email === 'customer@oolaa.demo' ? 'cus_1' : email === 'marketing2@example.demo' ? 'cus_2' : undefined }));
+  ['Arjun Rao', 'owner3@example.demo', 'Media Owner'], ['Priya Menon', 'owner4@example.demo', 'Media Owner'], ['Senthil Velan', 'owner5@example.demo', 'Media Owner'], ['Farhan Ali', 'owner6@example.demo', 'Media Owner'], ['Deepa Iyer', 'owner7@example.demo', 'Media Owner'], ['Karthik S', 'owner8@example.demo', 'Media Owner'], ['Meera Joshi', 'owner9@example.demo', 'Media Owner'], ['Vikram Reddy', 'owner10@example.demo', 'Media Owner'],
+].map(([name, email, role], i) => ({ id: `usr_${i + 1}`, name, email, role: role as User['role'], active: true, ownerId: email === 'owner@oolaa.demo' ? 'own_1' : /^owner(\d+)@example\.demo$/.test(email) ? `own_${email.match(/^owner(\d+)@example\.demo$/)![1]}` : undefined, customerId: email === 'customer@oolaa.demo' ? 'cus_1' : email === 'marketing2@example.demo' ? 'cus_2' : undefined }));
 
 const nSeed: [Notification['audience'], string, string, string][] = [
   ['internal', 'New quotation request', 'Spice Route Restaurants requested a quote for 2 sites', '/admin/quotations'], ['internal', 'Asset submitted for verification', 'Banjara Hills Digital Screen awaits review', '/admin/verification'],

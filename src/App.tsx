@@ -39,7 +39,7 @@ export default function App() {
         <Route path="disputes" element={<DisputesPage mode="customer" />} /><Route path="invoices" element={<Cus.CustomerInvoices />} /><Route path="invoices/:id" element={<Cus.CustomerInvoiceDetail />} /><Route path="account" element={<Cus.CustomerAccount />} /><Route path="notifications" element={<NotificationsPage />} />
       </Route>
       <Route path="owner" element={<RequireRole area="owner" />}>
-        <Route index element={<Own.OwnerDashboard />} /><Route path="inventory" element={<Own.OwnerInventory />} /><Route path="calendar" element={<Own.OwnerCalendar />} />
+        <Route index element={<Own.OwnerDashboard />} /><Route path="inventory" element={<Own.OwnerInventory />} /><Route path="calendar" element={<Own.OwnerCalendar />} /><Route path="quotation-requests" element={<Own.OwnerQuotationRequests />} />
         <Route path="orders" element={<Own.OwnerOrders />} /><Route path="disputes" element={<DisputesPage mode="owner" />} /><Route path="proofs" element={<Own.OwnerProofs />} /><Route path="profile" element={<Own.OwnerProfile />} /><Route path="notifications" element={<NotificationsPage />} />
       </Route>
       <Route path="admin" element={<RequireRole area="admin" />}>
