@@ -15,16 +15,16 @@ export interface Contact { disabled?: boolean; name: string; email: string; role
 export interface Customer { id: string; company: string; contact: string; email: string; phone: string; city: string; industry: string; gstin: string; contacts: Contact[]; }
 export interface Brand { disabled?: boolean; id: string; customerId: string; name: string; category: string; }
 export interface Campaign { id: string; customerId: string; brandId: string; name: string; start: string; end: string; budget: number; status: 'Planning' | 'Quotation' | 'Booked' | 'Live' | 'Completed' | 'Cancelled'; assetIds: string[]; notes: string; }
-export interface QuoteItem { assetId: string; start: string; end: string; rate: number; supplierCost: number; }
+export interface QuoteItem { assetId: string; start: string; end: string; rate: number; supplierCost: number; quantity?: number; }
 export type QuoteStatus = 'Requested' | 'Draft' | 'Sent' | 'Revision Requested' | 'Approved' | 'Rejected' | 'Expired';
 export interface Quotation {
   disabled?: boolean;
   id: string; number: string; campaignId: string; customerId: string; status: QuoteStatus; items: QuoteItem[];
   production: number; installation: number; service: number; productionCost: number; installationCost: number; otherCost: number;
-  discount: number; taxRate: number; expiry: string; createdAt: string; notes: string; internalApproved?: boolean; ownerApprovals?: string[];
+  discount: number; taxRate: number; expiry: string; createdAt: string; notes: string; internalApproved?: boolean; ownerApprovals?: string[]; revisionOf?: string; revisionNumber?: number; revisionHistory?: { at: string; by: string; action: string; summary: string; reason?: string }[]; ownerApprovalHistory?: { ownerId: string; at: string; action: 'Approved' | 'Rejected'; reason?: string }[]; customerApprovedAt?: string; customerApprovedBy?: string;
 }
 export type BookingStatus = 'Enquiry' | 'Quotation in Progress' | 'Quotation Sent' | 'Awaiting Customer Approval' | 'Awaiting Supplier Confirmation' | 'Confirmed' | 'Artwork Pending' | 'Scheduled' | 'Installation in Progress' | 'Live' | 'Completed' | 'Cancelled';
-export interface Booking { id: string; number: string; quotationId: string; campaignId: string; customerId: string; assetId: string; ownerId: string; start: string; end: string; amount: number; supplierCost: number; status: BookingStatus; createdAt: string; }
+export interface Booking { id: string; number: string; quotationId: string; campaignId: string; customerId: string; assetId: string; ownerId: string; start: string; end: string; amount: number; supplierCost: number; quantity?: number; holdExpiresAt?: string; status: BookingStatus; createdAt: string; }
 export type ArtworkStatus = 'Awaiting Upload' | 'Submitted' | 'Under Review' | 'Approved' | 'Revisions Requested' | 'Rejected';
 export interface HistoryEntry { at: string; by: string; action: string; note?: string; }
 export interface Artwork { id: string; campaignId: string; bookingId?: string; name: string; fileName: string; fileSize: number; fileType: string; fileKey?: string; preview?: string; version: number; status: ArtworkStatus; submittedAt: string; history: HistoryEntry[]; }
@@ -41,6 +41,7 @@ export interface Receipt { disabled?: boolean; id: string; number: string; invoi
 export interface SupplierPayment { id: string; poId: string; amount: number; date: string; method: string; reference: string; }
 export interface Expense { id: string; campaignId: string; type: 'Production' | 'Installation' | 'Other'; description: string; amount: number; date: string; }
 export interface Refund { id: string; invoiceId: string; amount: number; reason: string; status: 'Requested' | 'Approved' | 'Rejected'; history: HistoryEntry[]; }
+export interface CreditNote { id: string; number: string; invoiceId: string; customerId: string; amount: number; reason: string; date: string; status: 'Issued' | 'Cancelled'; createdBy: string; }
 export type DisputeCategory = 'Installation quality' | 'Proof of advertising' | 'Payment / invoice' | 'Refund' | 'Availability / double booking' | 'Artwork / creative' | 'Supplier no-show' | 'Other';
 export type DisputeStatus = 'Open' | 'Under Review' | 'Awaiting Information' | 'Resolved' | 'Closed';
 export interface DisputeMessage { at: string; by: string; role: 'Customer' | 'Media Owner' | 'Staff'; text: string; internal?: boolean; }
@@ -61,6 +62,6 @@ export interface DB {
   categories: Category[]; assets: Asset[]; owners: MediaOwner[]; customers: Customer[]; brands: Brand[]; campaigns: Campaign[];
   quotations: Quotation[]; bookings: Booking[]; artworks: Artwork[]; installations: Installation[]; proofs: Proof[];
   purchaseOrders: PurchaseOrder[]; invoices: Invoice[]; receipts: Receipt[]; supplierPayments: SupplierPayment[]; expenses: Expense[];
-  refunds: Refund[]; disputes: Dispute[]; users: User[]; notifications: Notification[]; audit: AuditEvent[]; settings: Settings;
+  refunds: Refund[]; creditNotes: CreditNote[]; disputes: Dispute[]; users: User[]; notifications: Notification[]; audit: AuditEvent[]; settings: Settings;
 }
 export type CollectionKey = Exclude<keyof DB, 'schemaVersion' | 'seededAt' | 'settings'>;

@@ -33,7 +33,7 @@ export function FormFields({ fields, value, set, errors }: { fields: FieldDef[];
 export interface CrudProps<R extends { id: string }> {
   title: string; subtitle?: string; collection: CollectionKey; rows: R[]; cols: Col<R>[]; fields: FieldDef[]; defaults?: Partial<R>;
   canCreate?: boolean; canEdit?: boolean | ((r: R) => boolean); canDelete?: boolean; deleteCheck?: (r: R) => string | null;
-  filters?: { key: string; label: string; options: string[] }[]; searchKeys?: string[]; toRecord?: (form: any, prev?: R) => any; csvName?: string;
+  filters?: { key: string; label: string; options: string[] }[]; searchKeys?: string[]; toRecord?: (form: any, prev?: R) => any; onSave?: (record: any, previous?: R) => Promise<void>; csvName?: string;
   extra?: (r: R) => ReactNode; extraEnd?: (r: R) => ReactNode; onRow?: (r: R) => void; headerExtra?: ReactNode; entityLabel?: string; prefix?: string;
 }
 export function CrudPage<R extends { id: string }>(p: CrudProps<R>) {
@@ -48,9 +48,11 @@ export function CrudPage<R extends { id: string }>(p: CrudProps<R>) {
     const data: any = { ...form }; p.fields.filter(f => f.type === 'number').forEach(f => data[f.name] = Number(data[f.name] || 0));
     const rec = p.toRecord ? p.toRecord(data, editing === 'new' ? undefined : editing!) : data;
     setSaving(true);
-    if (editing === 'new') { const pr = api.create(p.collection, rec, p.prefix, `${label} created`); setEditing(null); await pr; toast(`${label} created`); }
-    else { const pr = api.update(p.collection, (editing as R).id, rec, `${label} updated`); setEditing(null); await pr; toast(`${label} updated`); }
-    setSaving(false);
+    try {
+      if (p.onSave) { await p.onSave(rec, editing === 'new' ? undefined : editing as R); setEditing(null); toast(`${label} ${editing === 'new' ? 'created' : 'updated'}`); }
+      else if (editing === 'new') { const pr = api.create(p.collection, rec, p.prefix, `${label} created`); setEditing(null); await pr; toast(`${label} created`); }
+      else { const pr = api.update(p.collection, (editing as R).id, rec, `${label} updated`); setEditing(null); await pr; toast(`${label} updated`); }
+    } finally { setSaving(false); }
   };
   const toggle = (r: R) => toggleDisabled(p.collection, r as any, label);
   const editable = (r: R) => typeof p.canEdit === 'function' ? p.canEdit(r) : p.canEdit !== false;

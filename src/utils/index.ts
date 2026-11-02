@@ -20,8 +20,10 @@ export const pct = (n: number) => `${(Number.isFinite(n) ? n : 0).toFixed(1)}%`;
 export const prorate = (monthly: number, start: string, end: string) => r2(monthly * daysBetween(start, end) / 30);
 
 export function quoteTotals(q: Quotation) {
-  const media = sum(q.items.map(i => i.rate));
-  const supplierMedia = sum(q.items.map(i => i.supplierCost));
+  // QuoteItem.rate and supplierCost are unit prices for the requested date range.
+  // All financial totals must account for the requested quantity.
+  const media = sum(q.items.map(i => i.rate * Math.max(1, Number(i.quantity) || 1)));
+  const supplierMedia = sum(q.items.map(i => i.supplierCost * Math.max(1, Number(i.quantity) || 1)));
   const subtotal = sum([media, q.production, q.installation, q.service]);
   const discounted = r2(subtotal - (q.discount || 0));
   const tax = r2(discounted * (q.taxRate || 0) / 100);
@@ -39,9 +41,10 @@ export function invoiceTotals(inv: Invoice, db: DB) {
   const total = r2(net + tax);
   const paid = sum(db.receipts.filter(r => r.invoiceId === inv.id && !r.disabled).map(r => r.amount));
   const refunded = sum(db.refunds.filter(r => r.invoiceId === inv.id && r.status === 'Approved').map(r => r.amount));
-  const balance = inv.status === 'Cancelled' || inv.status === 'Draft' ? 0 : r2(total - paid + refunded);
+  const credited = sum((db.creditNotes || []).filter(c => c.invoiceId === inv.id && c.status === 'Issued').map(c => c.amount));
+  const balance = inv.status === 'Cancelled' || inv.status === 'Draft' ? 0 : r2(Math.max(0, total - paid - credited + refunded));
   const overdue = balance > 0 && inv.due < today() && inv.status !== 'Draft';
-  return { subtotal, net, tax, total, paid, refunded, balance, overdue };
+  return { subtotal, net, tax, total, paid, refunded, credited, balance, overdue };
 }
 export function poTotals(po: PurchaseOrder, db: DB) {
   const total = sum(po.items.map(i => i.amount));
@@ -52,12 +55,39 @@ export function poTotals(po: PurchaseOrder, db: DB) {
 
 const ACTIVE: BookingStatus[] = ['Awaiting Supplier Confirmation', 'Confirmed', 'Artwork Pending', 'Scheduled', 'Installation in Progress', 'Live'];
 const HARD: BookingStatus[] = ['Confirmed', 'Artwork Pending', 'Scheduled', 'Installation in Progress', 'Live'];
-export function conflicts(db: DB, assetId: string, start: string, end: string, ignoreBookingId?: string, includeHolds = true) {
-  const set = includeHolds ? ACTIVE : HARD;
-  const b = db.bookings.filter(x => x.assetId === assetId && x.id !== ignoreBookingId && set.includes(x.status) && overlaps(start, end, x.start, x.end));
-  const asset = db.assets.find(a => a.id === assetId);
-  const blocks = (asset?.blocks || []).filter(k => overlaps(start, end, k.from, k.to));
-  return { bookings: b, blocks, ok: b.length === 0 && blocks.length === 0 };
+export interface CapacityRequest { assetId: string; start: string; end: string; quantity?: number; }
+
+/** Common capacity validator. Capacity is evaluated per calendar day so non-overlapping
+ * bookings do not consume capacity simultaneously. Existing missing quantities count as 1. */
+export function validateCapacity(db: DB, requests: CapacityRequest[], ignoreBookingId?: string, includeHolds = true) {
+  const results = requests.map(request => {
+    const asset = db.assets.find(a => a.id === request.assetId);
+    const category = db.categories.find(c => c.id === asset?.categoryId);
+    const capacity = category?.bookingModel === 'Exclusive date-based' ? 1 : Math.max(1, Number(asset?.capacity) || 1);
+    const countedStatuses = includeHolds ? ACTIVE : HARD;
+    const bookings = db.bookings.filter(b => b.assetId === request.assetId && b.id !== ignoreBookingId && countedStatuses.includes(b.status) && overlaps(request.start, request.end, b.start, b.end));
+    const blocks = (asset?.blocks || []).filter(k => overlaps(request.start, request.end, k.from, k.to));
+    const requestedQuantity = Math.max(1, Number(request.quantity) || 1);
+    let peakUsedCapacity = 0;
+    let capacityExceeded = false;
+    const assetRequests = requests.filter(x => x.assetId === request.assetId);
+    // Inclusive date ranges; evaluate existing + requested units on each same day.
+    for (let day = request.start; day <= request.end; ) {
+      const used = bookings.filter(b => b.start <= day && day <= b.end).reduce((n, b) => n + Math.max(1, Number(b.quantity) || 1), 0);
+      const requested = assetRequests.filter(x => x.start <= day && day <= x.end).reduce((n, x) => n + Math.max(1, Number(x.quantity) || 1), 0);
+      peakUsedCapacity = Math.max(peakUsedCapacity, used);
+      if (used + requested > capacity) capacityExceeded = true;
+      const dt = new Date(`${day}T00:00:00Z`); dt.setUTCDate(dt.getUTCDate() + 1); day = dt.toISOString().slice(0, 10);
+    }
+    return { request, bookings, blocks, capacity, usedCapacity: peakUsedCapacity, requestedQuantity, capacityExceeded, ok: !!asset && request.start <= request.end && !capacityExceeded && blocks.length === 0 };
+  });
+  return { ok: results.every(r => r.ok), results };
+}
+
+export function conflicts(db: DB, assetId: string, start: string, end: string, ignoreBookingId?: string, includeHolds = true, requestedQuantity = 1) {
+  const check = validateCapacity(db, [{ assetId, start, end, quantity: requestedQuantity }], ignoreBookingId, includeHolds);
+  const r = check.results[0];
+  return { bookings: r?.bookings || [], blocks: r?.blocks || [], capacity: r?.capacity || 1, usedCapacity: r?.usedCapacity || 0, capacityExceeded: r?.capacityExceeded || false, ok: !!r?.ok };
 }
 export function dayStatus(db: DB, asset: Asset, date: string): { status: 'Available' | 'Held' | 'Booked' | 'Blocked'; ref?: string } {
   const b = db.bookings.find(x => x.assetId === asset.id && ACTIVE.includes(x.status) && date >= x.start && date <= x.end);
@@ -97,8 +127,5 @@ export const bookingIsActive = (b: Booking) => ACTIVE.includes(b.status);
 /** Date-range availability used by search. Exclusive-date assets must have no overlapping hold/booking/block;
  *  shared-capacity assets (capacity > 1) stay available until overlapping bookings reach capacity. Blocked dates always exclude. */
 export function isAvailableForRange(db: DB, asset: Asset, start: string, end: string) {
-  const c = conflicts(db, asset.id, start, end);
-  if (c.blocks.length) return false;
-  const cap = Math.max(1, asset.capacity || 1);
-  return c.bookings.length < cap;
+  return validateCapacity(db, [{ assetId: asset.id, start, end, quantity: 1 }]).ok;
 }

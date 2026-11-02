@@ -8,18 +8,20 @@ const SESSION = 'oolaa_demo_session';
 let db: DB;
 const listeners = new Set<() => void>();
 
-const REQUIRED: CollectionKey[] = ['categories', 'assets', 'owners', 'customers', 'brands', 'campaigns', 'quotations', 'bookings', 'artworks', 'installations', 'proofs', 'purchaseOrders', 'invoices', 'receipts', 'supplierPayments', 'expenses', 'refunds', 'disputes', 'users', 'notifications', 'audit'];
+const REQUIRED: CollectionKey[] = ['categories', 'assets', 'owners', 'customers', 'brands', 'campaigns', 'quotations', 'bookings', 'artworks', 'installations', 'proofs', 'purchaseOrders', 'invoices', 'receipts', 'supplierPayments', 'expenses', 'refunds', 'creditNotes', 'disputes', 'users', 'notifications', 'audit'];
 export function isValidDB(x: any): x is DB {
   if (!x || typeof x !== 'object') return false;
   // Migrate older browser demo data without discarding existing bookings or invoices.
   if (x.schemaVersion === 1 && !Array.isArray(x.disputes)) x.disputes = [];
-  if (x.schemaVersion === 1 || x.schemaVersion === 2) {
+  if (x.schemaVersion < 4) { if (!Array.isArray(x.creditNotes)) x.creditNotes = []; }
+  if (x.schemaVersion === 1 || x.schemaVersion === 2 || x.schemaVersion === 3) {
     if (!Array.isArray(x.disputes)) x.disputes = [];
     if (Array.isArray(x.users)) {
       const seededOwners = buildSeed().users.filter(u => u.role === 'Media Owner' && u.ownerId);
       const emails = new Set(x.users.map((u: User) => u.email));
       seededOwners.filter(u => !emails.has(u.email)).forEach(u => x.users.push(u));
     }
+    if (!Array.isArray(x.creditNotes)) x.creditNotes = [];
     x.schemaVersion = SCHEMA_VERSION;
   }
   return x.schemaVersion === SCHEMA_VERSION && x.settings && REQUIRED.every(k => Array.isArray(x[k]));

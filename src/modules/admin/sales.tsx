@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Plus, Trash2, Send, Check, Printer, ShieldCheck, ArrowRight, FileText, Copy } from 'lucide-react';
-import { useDB, useSession, api, getDB } from '../../services/storage.service';
+import { useDB, useSession, api, getDB, getSession } from '../../services/storage.service';
 import { can, sendQuotation, approveQuotation, advanceBooking, transitionCheck, completeCampaign, campaignCompletion, invoiceFromCampaign } from '../../services/workflows';
 import { CrudPage } from '../../components/CrudPage';
 import { Button, Card, Badge, PageHeader, Table, Modal, Field, Input, Select, toast, toastErr, Empty, Notice, promptDialog, confirmDialog, Tabs, inputCls, ExportBtn } from '../../components/ui';
@@ -116,7 +116,7 @@ export function QuotationBuilder() {
   if (id && id !== 'new' && !existing) return <Empty title="Quotation not found" />;
   const locked = ['Approved', 'Rejected'].includes(q.status); const t = quoteTotals(q); const camp = db.campaigns.find(c => c.id === q.campaignId);
   const set = (p: Partial<Quotation>) => setQ({ ...q, ...p });
-  const addAsset = (aid: string) => { const a = db.assets.find(x => x.id === aid)!; const s = camp?.start || today(), e = camp?.end || addDays(today(), 29); set({ items: [...q.items, { assetId: aid, start: s, end: e, rate: prorate(a.rate, s, e), supplierCost: prorate(a.supplierRate, s, e) }] }); };
+  const addAsset = (aid: string) => { const a = db.assets.find(x => x.id === aid)!; const s = camp?.start || today(), e = camp?.end || addDays(today(), 29); set({ items: [...q.items, { assetId: aid, start: s, end: e, quantity: 1, rate: prorate(a.rate, s, e), supplierCost: prorate(a.supplierRate, s, e) }] }); };
   const setItem = (i: number, p: any) => set({ items: q.items.map((x, k) => k === i ? { ...x, ...p } : x) });
   const save = async (status?: Quotation['status']) => {
     if (!q.customerId || !q.campaignId) return toast('Select customer and campaign', 'error'); if (!q.items.length) return toast('Add at least one asset', 'error');
@@ -129,7 +129,7 @@ export function QuotationBuilder() {
       original.items.length !== q.items.length ||
       original.items.some((item, index) => {
         const next = q.items[index];
-        return !next || item.assetId !== next.assetId || item.start !== next.start || item.end !== next.end;
+        return !next || item.assetId !== next.assetId || item.start !== next.start || item.end !== next.end || Math.max(1, Number(item.quantity) || 1) !== Math.max(1, Number(next.quantity) || 1);
       })
     );
     const rec = {
@@ -138,20 +138,34 @@ export function QuotationBuilder() {
       // Availability approvals apply to specific assets/date ranges. If Sales changes
       // that scope, all owners must review the revised scope again.
       ownerApprovals: approvalScopeChanged ? [] : q.ownerApprovals,
+      revisionHistory: [...(q.revisionHistory || []), { at: new Date().toISOString(), by: getSession()?.name || 'Sales', action: 'Saved', summary: `Total changed from ₹${original ? quoteTotals(original).total.toFixed(2) : '0.00'} to ₹${quoteTotals(q).total.toFixed(2)}.${approvalScopeChanged ? ' Asset/date/quantity scope changed; owner approvals reset.' : ''}` }],
     } as Quotation;
     if (existing) { await api.update('quotations', q.id, rec, `Quotation ${q.number} saved`); setQ(rec); toast('Quotation saved'); return rec; }
     const created = await api.create('quotations', { ...rec, id: undefined }, 'quo', `Quotation ${q.number} created`); toast('Quotation created'); nav(`/admin/quotations/${created.id}`, { replace: true }); return created;
   };
   const send = async () => { setBusy(true); try { const r = await save(); if (r) { await sendQuotation(getDB().quotations.find(x => x.id === r.id)!); setQ({ ...r, status: 'Sent' }); toast('Sent to customer for review'); } } catch (e) { toastErr(e); } setBusy(false); };
-  const revise = async () => { const r = await api.create('quotations', { ...q, id: undefined, number: seqNo('OQ', getDB().quotations), status: 'Requested', ownerApprovals: [], createdAt: today(), expiry: addDays(today(), db.settings.quoteValidityDays), notes: `Revision of ${q.number}` }, 'quo', `Revision of ${q.number}`); if (q.status === 'Sent' || q.status === 'Expired' || q.status === 'Revision Requested') await api.update('quotations', q.id, { status: 'Rejected', notes: q.notes + '\nSuperseded by revision' }); toast('Revision created'); nav(`/admin/quotations/${r.id}`); setQ(structuredClone(r)); };
+  const revise = async () => {
+    if (q.status === 'Approved') return toast('This quotation has already been accepted and booking records may exist. Use the change/cancellation workflow instead.', 'error');
+    const reason = await promptDialog('Reason for quotation revision'); if (!reason?.trim()) return;
+    const latest = getDB().quotations.find(x => x.id === q.id) || q;
+    const r = await api.create('quotations', {
+      ...latest, id: undefined, number: seqNo('OQ', getDB().quotations), status: 'Requested',
+      ownerApprovals: [], internalApproved: false, revisionOf: latest.revisionOf || latest.id,
+      revisionNumber: (latest.revisionNumber || 1) + 1, createdAt: today(),
+      expiry: addDays(today(), db.settings.quoteValidityDays), notes: `Revision of ${latest.number}\nReason: ${reason.trim()}`,
+      revisionHistory: [...(latest.revisionHistory || []), { at: new Date().toISOString(), by: getSession()?.name || 'Sales', action: 'Revision created', summary: `Previous total ₹${quoteTotals(latest).total.toFixed(2)}; new revision starts at ₹${quoteTotals(latest).total.toFixed(2)}. All owner approvals reset.`, reason: reason.trim() }],
+    }, 'quo', `Revision of ${latest.number}`);
+    if (!['Approved', 'Rejected'].includes(latest.status)) await api.update('quotations', latest.id, { status: 'Rejected', notes: latest.notes + `\nSuperseded by revision ${r.number}` });
+    toast('Revision created; owners must re-review availability'); nav(`/admin/quotations/${r.id}`); setQ(structuredClone(r));
+  };
   const custOpts = db.customers.map(c => ({ value: c.id, label: c.company }));
   const enabledAssets = db.assets.filter(a => db.categories.find(c => c.id === a.categoryId)?.enabled && !a.disabled && a.verification === 'Approved' && !q.items.some(i => i.assetId === a.id));
   return <div><Link to="/admin/quotations" className="text-sm text-slate-500">← Quotations</Link>
     <PageHeader title={`${existing ? 'Quotation' : 'New quotation'} ${q.number}`} subtitle={<span className="flex items-center gap-2">Status <Badge>{q.status}</Badge>{q.expiry < today() && <Badge>Expired</Badge>}{q.internalApproved && <Badge>Approved</Badge>}</span>}
       actions={<>{!locked && <Button variant="outline" onClick={() => save()}>Save draft</Button>}{!locked && costs && !q.internalApproved && existing && <Button variant="outline" onClick={async () => { await api.update('quotations', q.id, { internalApproved: true }, `Quotation ${q.number} internally approved`); set({ internalApproved: true }); toast('Internally approved'); }}><Check size={16} />Internal approve</Button>}
         {!locked && q.status !== 'Sent' && <Button loading={busy} onClick={send}><Send size={16} />Send to customer</Button>}
-        {q.status === 'Sent' && <Button variant="success" onClick={async () => { if (await confirmDialog('Record customer approval?', 'Use when the customer approved offline. Availability will be checked.', false)) { try { await approveQuotation(q.id); setQ(getDB().quotations.find(x => x.id === q.id)!); toast('Approved; bookings & POs generated'); } catch (e) { toastErr(e); } } }}>Record approval</Button>}
-        {existing && <Button variant="outline" onClick={revise}><Copy size={16} />Revise</Button>}<Button variant="outline" onClick={() => setPreview(true)}><Printer size={16} />Preview / print</Button>
+        {q.status === 'Sent' && <Button variant="success" onClick={async () => { if (await confirmDialog('Record customer approval?', 'Use when the customer approved offline. Availability will be checked.', false)) { try { await approveQuotation(q.id, { recordedOffline: true }); setQ(getDB().quotations.find(x => x.id === q.id)!); toast('Approved; bookings & POs generated'); } catch (e) { toastErr(e); } } }}>Record approval</Button>}
+        {existing && q.status !== 'Approved' && <Button variant="outline" onClick={revise}><Copy size={16} />Revise</Button>}<Button variant="outline" onClick={() => setPreview(true)}><Printer size={16} />Preview / print</Button>
         {existing && ['Draft', 'Requested', 'Rejected', 'Expired'].includes(q.status) && <DisableBtn disabled={q.disabled} onClick={async () => { if (await toggleDisabled('quotations', q, `Quotation ${q.number}`) && !q.disabled) nav('/admin/quotations'); }} />}</>} />
     {q.status === 'Revision Requested' && <Notice>Customer requested a revision. See notes below.</Notice>}
     <div className="grid xl:grid-cols-[1fr_340px] gap-4 mt-3">
@@ -160,12 +174,12 @@ export function QuotationBuilder() {
           <Field label="Campaign"><Select disabled={locked} options={db.campaigns.filter(c => c.customerId === q.customerId).map(c => ({ value: c.id, label: c.name }))} placeholder="Select" value={q.campaignId} onChange={(e: any) => set({ campaignId: e.target.value })} /></Field>
           <Field label="Expiry date"><Input disabled={locked} type="date" value={q.expiry} onChange={(e: any) => set({ expiry: e.target.value })} /></Field></Card>
         <Card><div className="p-3 border-b flex gap-2 items-center"><b className="text-sm flex-1">Line items</b>{!locked && <Select className="w-72" options={enabledAssets.map(a => ({ value: a.id, label: `${a.code} · ${a.name}` }))} placeholder="+ Add asset" value="" onChange={(e: any) => e.target.value && addAsset(e.target.value)} />}</div>
-          <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-2 text-left">Asset</th><th className="p-2">Start</th><th className="p-2">End</th><th className="p-2">Customer price</th>{costs && <th className="p-2 text-rose-600">Supplier cost</th>}<th /></tr></thead>
-            <tbody>{q.items.map((it, i) => { const a = db.assets.find(x => x.id === it.assetId); const c = conflicts(db, it.assetId, it.start, it.end); return <tr key={i} className="border-t"><td className="p-2 min-w-[180px]">{a?.name}<div className="text-[11px] text-slate-400">{inr(a?.rate || 0)}/mo{!c.ok && q.status !== 'Approved' && <span className="text-rose-600"> · ⚠ conflict</span>}</div></td>
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead className="bg-slate-50 text-xs text-slate-500"><tr><th className="p-2 text-left">Asset</th><th className="p-2">Start</th><th className="p-2">End</th><th className="p-2">Qty</th><th className="p-2">Unit price</th>{costs && <th className="p-2 text-rose-600">Supplier cost</th>}<th /></tr></thead>
+            <tbody>{q.items.map((it, i) => { const a = db.assets.find(x => x.id === it.assetId); const c = conflicts(db, it.assetId, it.start, it.end, undefined, true, it.quantity || 1); return <tr key={i} className="border-t"><td className="p-2 min-w-[180px]">{a?.name}<div className="text-[11px] text-slate-400">{inr(a?.rate || 0)}/mo{!c.ok && q.status !== 'Approved' && <span className="text-rose-600"> · ⚠ conflict</span>}</div></td>
               <td className="p-1"><input disabled={locked} type="date" className={inputCls} value={it.start} onChange={e => setItem(i, { start: e.target.value, rate: prorate(a!.rate, e.target.value, it.end), supplierCost: prorate(a!.supplierRate, e.target.value, it.end) })} /></td>
               <td className="p-1"><input disabled={locked} type="date" className={inputCls} value={it.end} onChange={e => setItem(i, { end: e.target.value, rate: prorate(a!.rate, it.start, e.target.value), supplierCost: prorate(a!.supplierRate, it.start, e.target.value) })} /></td>
-              <td className="p-1"><input disabled={locked} type="number" className={inputCls + ' w-28'} value={it.rate} onChange={e => setItem(i, { rate: +e.target.value })} /></td>
-              {costs && <td className="p-1"><input disabled={locked} type="number" className={inputCls + ' w-28'} value={it.supplierCost} onChange={e => setItem(i, { supplierCost: +e.target.value })} /></td>}
+              <td className="p-1"><input disabled={locked} type="number" min={1} step={1} className={inputCls + ' w-16'} value={it.quantity || 1} onChange={e => setItem(i, { quantity: Math.max(1, Math.floor(Number(e.target.value) || 1)) })} /></td><td className="p-1"><input disabled={locked} type="number" min={0} className={inputCls + ' w-28'} value={it.rate} onChange={e => setItem(i, { rate: +e.target.value })} /><div className="text-[10px] text-slate-500">Line total: {inr(it.rate * Math.max(1, Number(it.quantity) || 1))}</div></td>
+              {costs && <td className="p-1"><input disabled={locked} type="number" min={0} className={inputCls + ' w-28'} value={it.supplierCost} onChange={e => setItem(i, { supplierCost: +e.target.value })} /><div className="text-[10px] text-slate-500">Line total: {inr(it.supplierCost * Math.max(1, Number(it.quantity) || 1))}</div></td>}
               <td className="p-1">{!locked && <button onClick={() => set({ items: q.items.filter((_, k) => k !== i) })}><Trash2 size={14} className="text-rose-500" /></button>}</td></tr>; })}</tbody></table>{!q.items.length && <Empty title="No assets added" />}</div></Card>
         <Card className="p-4"><div className="grid sm:grid-cols-4 gap-3">{([['production', 'Production charge'], ['installation', 'Installation charge'], ['service', 'Service charge'], ['discount', 'Discount (₹)'], ['taxRate', 'GST %']] as const).map(([k, l]) => <Field key={k} label={l}><Input disabled={locked} type="number" min={0} value={(q as any)[k]} onChange={(e: any) => set({ [k]: Math.max(0, +e.target.value) } as any)} /></Field>)}
           {costs && ([['productionCost', 'Production cost'], ['installationCost', 'Installation cost'], ['otherCost', 'Other direct cost']] as const).map(([k, l]) => <Field key={k} label={<span className="text-rose-600">{l} (internal)</span>}><Input disabled={locked} type="number" min={0} value={(q as any)[k]} onChange={(e: any) => set({ [k]: Math.max(0, +e.target.value) } as any)} /></Field>)}</div>
@@ -181,7 +195,7 @@ export function QuotationBuilder() {
 export function AdminPlanning() {
   const db = useDB(); const nav = useNavigate(); const [f, setF] = useState({ city: '', cat: '', start: addDays(today(), 30), end: addDays(today(), 59) }); const [sel, setSel] = useState<string[]>([]); const [cust, setCust] = useState(''); const [camp, setCamp] = useState('');
   const list = db.assets.filter(a => !a.disabled && a.verification === 'Approved' && db.categories.find(c => c.id === a.categoryId)?.enabled && (!f.city || a.city === f.city) && (!f.cat || a.categoryId === f.cat));
-  const create = async () => { if (!camp || !sel.length) return toast('Choose a campaign and assets', 'error'); const c = db.campaigns.find(x => x.id === camp)!; const r = await api.create('quotations', { number: seqNo('OQ', db.quotations), campaignId: camp, customerId: c.customerId, status: 'Draft', items: sel.map(id => { const a = db.assets.find(x => x.id === id)!; return { assetId: id, start: f.start, end: f.end, rate: prorate(a.rate, f.start, f.end), supplierCost: prorate(a.supplierRate, f.start, f.end) }; }), production: 0, installation: 0, service: 0, productionCost: 0, installationCost: 0, otherCost: 0, discount: 0, taxRate: db.settings.taxRate, expiry: addDays(today(), db.settings.quoteValidityDays), createdAt: today(), notes: 'Created from media planning' }, 'quo', 'Quotation created from media plan'); toast('Draft quotation created'); nav(`/admin/quotations/${r.id}`); };
+  const create = async () => { if (!camp || !sel.length) return toast('Choose a campaign and assets', 'error'); const c = db.campaigns.find(x => x.id === camp)!; const r = await api.create('quotations', { number: seqNo('OQ', db.quotations), campaignId: camp, customerId: c.customerId, status: 'Draft', items: sel.map(id => { const a = db.assets.find(x => x.id === id)!; return { assetId: id, start: f.start, end: f.end, quantity: 1, rate: prorate(a.rate, f.start, f.end), supplierCost: prorate(a.supplierRate, f.start, f.end) }; }), production: 0, installation: 0, service: 0, productionCost: 0, installationCost: 0, otherCost: 0, discount: 0, taxRate: db.settings.taxRate, expiry: addDays(today(), db.settings.quoteValidityDays), createdAt: today(), notes: 'Created from media planning' }, 'quo', 'Quotation created from media plan'); toast('Draft quotation created'); nav(`/admin/quotations/${r.id}`); };
   return <div><PageHeader title="Media Planning" subtitle="Build a plan with live availability, then convert to a quotation" />
     <Card className="p-3 grid sm:grid-cols-2 lg:grid-cols-6 gap-2 mb-4"><Select options={[...new Set(db.assets.map(a => a.city))]} placeholder="All cities" value={f.city} onChange={(e: any) => setF({ ...f, city: e.target.value })} /><Select options={db.categories.filter(c => c.enabled).map(c => ({ value: c.id, label: c.name }))} placeholder="All categories" value={f.cat} onChange={(e: any) => setF({ ...f, cat: e.target.value })} /><Input type="date" value={f.start} onChange={(e: any) => setF({ ...f, start: e.target.value })} /><Input type="date" value={f.end} onChange={(e: any) => setF({ ...f, end: e.target.value })} />
       <Select options={db.customers.map(c => ({ value: c.id, label: c.company }))} placeholder="Customer" value={cust} onChange={(e: any) => { setCust(e.target.value); setCamp(''); }} /><Select options={db.campaigns.filter(c => c.customerId === cust).map(c => ({ value: c.id, label: c.name }))} placeholder="Campaign" value={camp} onChange={(e: any) => setCamp(e.target.value)} /></Card>

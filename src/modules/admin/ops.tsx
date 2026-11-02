@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Check, X, RotateCcw, Eye, AlertTriangle } from 'lucide-react';
 import { useDB, useSession, api, getDB } from '../../services/storage.service';
+import { advanceBooking } from '../../services/workflows';
 import { CrudPage } from '../../components/CrudPage';
 import { Button, Card, Badge, PageHeader, Table, Select, toast, Empty, Notice, Tabs, Modal, promptDialog } from '../../components/ui';
 import { assetName, campName } from '../../components/shared';
@@ -32,11 +33,30 @@ export function ArtworkApprovals() {
 export function Installations() {
   const db = useDB(); const [proof, setProof] = useState<Installation | null>(null);
   const delayed = (i: Installation) => i.status !== 'Completed' && i.scheduled < today();
-  const quick = async (i: Installation, status: Installation['status']) => { let notes = i.notes; if (status === 'Issue Reported') { const n = await promptDialog('Describe the issue'); if (!n) return; notes = (notes ? notes + '\n' : '') + n; } await api.update('installations', i.id, { status, notes, completedAt: status === 'Completed' ? today() : i.completedAt }, `Installation ${status}`); toast(`Installation ${status.toLowerCase()}`); };
+  const saveInstallationStatus = async (i: Installation, status: Installation['status'], notes = i.notes) => {
+    let booking = getDB().bookings.find(x => x.id === i.bookingId);
+    if (!booking) throw new Error('The linked booking no longer exists.');
+    // Keep the booking state machine authoritative: Start advances the booking too.
+    if (status === 'In Progress' || status === 'Completed') {
+      if (booking.status === 'Scheduled') { await advanceBooking(booking.id, 'Installation in Progress'); booking = getDB().bookings.find(x => x.id === i.bookingId)!; }
+      if (booking.status !== 'Installation in Progress' && !(status === 'Completed' && booking.status === 'Live')) throw new Error(`Cannot mark installation ${status.toLowerCase()} while booking is ${booking.status}.`);
+    }
+    const previousStatus = i.status;
+    await api.update('installations', i.id, { ...i, status, notes, completedAt: status === 'Completed' ? today() : i.completedAt }, `Installation ${status}`);
+    try {
+      if (status === 'Completed' && booking.status !== 'Live') await advanceBooking(booking.id, 'Live');
+    } catch (error) {
+      // Avoid leaving the installation marked complete if the guarded booking transition fails.
+      await api.update('installations', i.id, { status: previousStatus, completedAt: i.completedAt }, 'Installation completion rolled back after booking transition failed');
+      throw error;
+    }
+  };
+  const quick = async (i: Installation, status: Installation['status']) => { let notes = i.notes; if (status === 'Issue Reported') { const n = await promptDialog('Describe the issue'); if (!n) return; notes = (notes ? notes + '\n' : '') + n; } try { await saveInstallationStatus(i, status, notes); toast(`Installation ${status.toLowerCase()}`); } catch (e) { toast(e instanceof Error ? e.message : 'Could not update installation', 'error'); } };
   return <><CrudPage title="Installation Tasks" entityLabel="Installation task" collection="installations" rows={db.installations} prefix="ins" searchKeys={['assignee', 'status', 'instructions']} filters={[{ key: 'status', label: 'statuses', options: ['Scheduled', 'In Progress', 'Completed', 'Delayed', 'Issue Reported'] }]}
     headerExtra={<span className="text-xs text-rose-600 self-center flex items-center gap-1"><AlertTriangle size={14} />{db.installations.filter(delayed).length} overdue</span>}
     defaults={{ status: 'Scheduled', scheduled: today(), assignee: 'Murugan (Installer)', instructions: 'Mount creative, verify lighting, capture proof.', notes: '', completedAt: '' } as any}
     toRecord={f => { const b = getDB().bookings.find(x => x.id === f.bookingId); if (!b) throw new Error('Invalid booking'); return { ...f, campaignId: b.campaignId, assetId: b.assetId, supplierId: f.supplierId || b.ownerId, completedAt: f.status === 'Completed' && !f.completedAt ? today() : f.completedAt }; }}
+    onSave={async (record, previous) => { if (!previous) { await api.create('installations', record, 'ins', 'Installation task created'); return; } const status = record.status as Installation['status']; const current = getDB().installations.find(x => x.id === previous.id) || previous; const linked = getDB().bookings.find(x => x.id === record.bookingId); if (!linked) throw new Error('Invalid booking'); if (record.bookingId !== previous.bookingId && ['In Progress', 'Completed'].includes(status)) throw new Error('Reassign the installation before starting or completing it.'); await api.update('installations', previous.id, { ...record, status: current.status, completedAt: current.completedAt }, 'Installation details updated'); if (status !== current.status) await saveInstallationStatus({ ...current, ...record, status: current.status }, status); }}
     deleteCheck={i => db.proofs.some(p => p.installationId === i.id && p.status !== 'Pending Upload') ? 'Task has uploaded proof records' : null}
     extra={i => <>{i.status !== 'Completed' && <><Button size="sm" variant="ghost" onClick={() => quick(i, i.status === 'Scheduled' ? 'In Progress' : 'Completed')}>{i.status === 'Scheduled' ? 'Start' : 'Complete'}</Button><Button size="sm" variant="ghost" onClick={() => quick(i, 'Issue Reported')}>Issue</Button></>}<Button size="sm" variant="ghost" onClick={() => setProof(i)}>Proof</Button></>}
     cols={[{ key: 'id', label: 'ID', render: i => <span className="text-xs font-mono">{i.id.slice(-6)}</span> }, { key: 'a', label: 'Asset / location', render: i => <div><b>{assetName(db, i.assetId)}</b><div className="text-xs text-slate-400">{db.assets.find(a => a.id === i.assetId)?.location}</div></div>, csv: i => assetName(db, i.assetId) }, { key: 'c', label: 'Campaign', render: i => campName(db, i.campaignId), csv: i => campName(db, i.campaignId) }, { key: 'scheduled', label: 'Scheduled', render: i => <span className={delayed(i) ? 'text-rose-600 font-medium' : ''}>{fmtDate(i.scheduled)}{delayed(i) && ' ⚠'}</span> }, { key: 'assignee', label: 'Assigned' }, { key: 'status', label: 'Status', render: i => <Badge>{i.status}</Badge> }, { key: 'completedAt', label: 'Completed', render: i => fmtDate(i.completedAt) }]}

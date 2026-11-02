@@ -24,12 +24,13 @@ export function BookingHistoryModal({ asset, onClose, amount = 'customer', showC
       <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm mb-3 text-slate-600">
         <span>{asset.code}</span><span><b>{rows.length}</b> booking{rows.length === 1 ? '' : 's'} ({live.length} not cancelled)</span><span>{amount === 'supplier' ? 'Your total' : 'Total value'}: <b>{inr(total)}</b></span></div>
       <div className="overflow-x-auto border rounded-xl"><table className="w-full text-sm">
-        <thead className="bg-slate-50 text-xs text-slate-500 text-left"><tr><th className="px-3 py-2">Booking</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Campaign</th><th className="px-3 py-2">Period</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">{amount === 'supplier' ? 'Your rate' : 'Amount'}</th>{showCost && amount === 'customer' && <th className="px-3 py-2 text-right">Supplier cost</th>}</tr></thead>
+        <thead className="bg-slate-50 text-xs text-slate-500 text-left"><tr><th className="px-3 py-2">Booking</th><th className="px-3 py-2">Customer</th><th className="px-3 py-2">Campaign</th><th className="px-3 py-2">Period</th><th className="px-3 py-2">Qty</th><th className="px-3 py-2">Status</th><th className="px-3 py-2 text-right">{amount === 'supplier' ? 'Your rate' : 'Amount'}</th>{showCost && amount === 'customer' && <th className="px-3 py-2 text-right">Supplier cost</th>}</tr></thead>
         <tbody className="divide-y">{rows.map(b => <tr key={b.id}>
           <td className="px-3 py-2 font-medium whitespace-nowrap">{b.number}</td>
           <td className="px-3 py-2">{custName(db, b.customerId)}</td>
           <td className="px-3 py-2">{db.campaigns.find(c => c.id === b.campaignId)?.name || '—'}</td>
           <td className="px-3 py-2 whitespace-nowrap">{fmtDate(b.start)} – {fmtDate(b.end)}</td>
+          <td className="px-3 py-2">{b.quantity || 1}</td>
           <td className="px-3 py-2"><Badge>{b.status}</Badge></td>
           <td className="px-3 py-2 text-right whitespace-nowrap">{inr(amount === 'supplier' ? b.supplierCost : b.amount)}</td>
           {showCost && amount === 'customer' && <td className="px-3 py-2 text-right whitespace-nowrap text-rose-600">{inr(b.supplierCost)}</td>}</tr>)}</tbody></table></div></>)}

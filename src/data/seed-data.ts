@@ -1,7 +1,7 @@
 import type { DB, Asset, Category, MediaOwner, Customer, Brand, Campaign, Quotation, Booking, Artwork, Installation, Proof, PurchaseOrder, Invoice, Receipt, SupplierPayment, Expense, User, Notification, Refund, Dispute, BookingStatus } from '../types';
 import { addDays, today, prorate, quoteTotals } from '../utils';
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 const P = (id: number) => `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&fit=crop&h=627&w=1200`;
 export const IMAGES = [P(33644177), P(29849362), P(5102100), P(1827234), P(14780175), P(29020287), P(28119461), P(16783119)];
 
@@ -147,7 +147,7 @@ const disputes: Dispute[] = (() => {
 export function buildSeed(): DB {
   return {
     schemaVersion: SCHEMA_VERSION, seededAt: new Date().toISOString(),
-    categories: cats, assets, owners, customers, brands, campaigns, quotations, bookings, artworks, installations, proofs, purchaseOrders, invoices, receipts, supplierPayments, expenses, refunds, disputes, users, notifications,
+    categories: cats, assets, owners, customers, brands, campaigns, quotations, bookings, artworks, installations, proofs, purchaseOrders, invoices, receipts, supplierPayments, expenses, refunds, creditNotes: [], disputes, users, notifications,
     audit: [{ id: 'aud_1', at: new Date().toISOString(), user: 'System', action: 'Seeded', entity: 'Demo', entityId: '-', summary: 'Demo dataset initialised' }],
     settings: { companyName: 'Oolaa.in (Demo)', taxRate: 18, quoteValidityDays: 15, currency: 'INR', invoiceDueDays: 30, gstNote: 'GST at 18% is a configurable demo assumption and requires professional validation.', workflows: { requireInternalQuoteApproval: false, requireProofApproval: true, requireArtworkApproval: true } },
   };

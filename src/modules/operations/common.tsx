@@ -2,8 +2,8 @@ import { useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Upload, Download, History, CheckCheck, CheckCircle2, Circle } from 'lucide-react';
 import type { Artwork, Proof, Notification } from '../../types';
-import { api, getDB, getFile, saveFile, fileToThumb, useDB, useSession, notify } from '../../services/storage.service';
-import { campaignCompletion } from '../../services/workflows';
+import { api, getDB, getFile, saveFile, fileToThumb, useDB, useSession, notify, getSession } from '../../services/storage.service';
+import { advanceBooking, campaignCompletion, completeCampaign } from '../../services/workflows';
 import { Button, Badge, Modal, toast, promptDialog, Card, Empty, PageHeader, Notice, cn, Stat, Field, Input } from '../../components/ui';
 import { fmtDate, inr, today, sum, invoiceTotals, exportCSV } from '../../utils';
 import { assetName, campName, PrintBtn } from '../../components/shared';
@@ -67,6 +67,20 @@ export async function reviewProof(p: Proof, status: Proof['status'] | 'More', by
   if (status === 'Rejected' || status === 'More') { const r = await promptDialog(status === 'More' ? 'Request additional evidence' : 'Reject proof'); if (!r) return; reason = r; }
   const s: Proof['status'] = status === 'More' ? 'Pending Upload' : status;
   await api.update('proofs', p.id, { status: s, reason }, `Proof ${status === 'More' ? 'additional evidence requested' : s.toLowerCase()} by ${by}`);
+  if (s === 'Approved') {
+    const live = getDB();
+    const booking = live.bookings.find(b => b.campaignId === p.campaignId && b.assetId === p.assetId && b.status === 'Live');
+    const actor = getSession();
+    if (booking && booking.end <= today() && (!live.settings.workflows.requireProofApproval || live.proofs.some(x => x.campaignId === p.campaignId && x.assetId === p.assetId && x.status === 'Approved')) && actor && ['Super Admin', 'Operations Manager', 'Campaign Coordinator', 'Installation Staff'].includes(actor.role)) {
+      await advanceBooking(booking.id, 'Completed');
+      const fresh = getDB();
+      const campaign = fresh.campaigns.find(c => c.id === p.campaignId);
+      if (campaign && ['Super Admin', 'Operations Manager'].includes(actor.role) && campaignCompletion(fresh, p.campaignId).ready) {
+        // Keep campaign completion behind its Finance, installation, proof and date guards.
+        await completeCampaign(p.campaignId);
+      }
+    }
+  }
   const c = getDB().campaigns.find(x => x.id === p.campaignId);
   if (s === 'Approved' && c) notify({ audience: 'customer', targetId: c.customerId, title: 'Proof approved', body: `New proof photos for ${assetName(getDB(), p.assetId)}`, link: '/customer/reports' });
   if (status === 'More') { const a = getDB().assets.find(x => x.id === p.assetId); notify({ audience: 'owner', targetId: a?.ownerId, title: 'Additional proof requested', body: reason, link: '/owner/proofs' }); }
@@ -78,7 +92,7 @@ export function NotificationsPage() {
   return <div><PageHeader title="Notifications" subtitle={`${list.filter(n => !n.read).length} unread`} actions={<Button variant="outline" onClick={async () => { await api.tx(d => { d.notifications = d.notifications.map(n => list.some(l => l.id === n.id) ? { ...n, read: true } : n); }); toast('All marked read'); }}><CheckCheck size={16} />Mark all read</Button>} />
     <Card className="divide-y">{list.map((n: Notification) => <div key={n.id} className={cn('flex gap-3 p-4 items-start', !n.read && 'bg-orange-50/40')}>
       <span className={cn('mt-1.5 w-2 h-2 rounded-full', n.read ? 'bg-slate-200' : 'bg-orange-500')} />
-      <button className="flex-1 text-left" onClick={() => { api.update('notifications', n.id, { read: true }, '', true); nav(n.link); }}><div className={cn('font-medium text-sm', n.disabled && 'opacity-60')}>{n.title} {n.disabled && <DisabledTag />}</div><div className="text-sm text-slate-500">{n.body}</div><div className="text-[11px] text-slate-400 mt-1">{new Date(n.at).toLocaleString('en-IN')}</div></button>
+      <button className="flex-1 text-left" onClick={() => { api.update('notifications', n.id, { read: true }, '', true); nav(n.link); }}><div className={cn('font-medium text-sm', n.disabled && 'opacity-60')}>{n.title} {n.disabled && <DisabledTag />}</div><div className="text-sm text-slate-500">{n.body}</div><div className="text-[11px] text-slate-400 mt-1">{new Date(n.at).toLocaleString('en-IN')}</div></button><div className="flex flex-col gap-1">{(() => { const customer = n.audience === 'customer' ? db.customers.find(c => c.id === n.targetId) : undefined; const owner = n.audience === 'owner' ? db.owners.find(o => o.id === n.targetId) : undefined; const email = customer?.email || owner?.email; const phone = customer?.phone || owner?.phone; const msg = `${n.title}\n${n.body}`; return <>{email && <a className="text-xs text-blue-600 underline" href={`mailto:${email}?subject=${encodeURIComponent(n.title)}&body=${encodeURIComponent(msg)}`} onClick={e => e.stopPropagation()}>Email</a>}{phone && <a className="text-xs text-emerald-700 underline" target="_blank" rel="noreferrer" href={`https://wa.me/${phone.replace(/\D/g, '')}?text=${encodeURIComponent(msg)}`} onClick={e => e.stopPropagation()}>WhatsApp</a>}</>; })()}</div>
       {!n.read && <Button size="sm" variant="ghost" onClick={() => api.update('notifications', n.id, { read: true }, '', true)}>Mark read</Button>}
       <DisableBtn disabled={n.disabled} onClick={() => toggleDisabled('notifications', n, 'Notification')} /></div>)}
       {!list.length && <Empty title="You're all caught up" />}</Card></div>;
